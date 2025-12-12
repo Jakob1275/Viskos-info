@@ -5,11 +5,41 @@ import matplotlib.pyplot as plt
 G = 9.80665  # m/s²
 
 # ---------------------------
-# Typische Pumpenkennlinie (Wasser) – fest hinterlegt (Demo)
+# 5 typische Pumpenkennlinien (Wasser) – Demo-Daten
+# Jede Pumpe: Q [m³/h], H [m], eta [-]
 # ---------------------------
-PUMP_QW = [0, 20, 40, 60, 80]                 # m³/h
-PUMP_HW = [48, 46, 40, 30, 18]                # m
-PUMP_ETAW = [0.30, 0.60, 0.72, 0.68, 0.55]    # -
+PUMPS = [
+    {
+        "id": "P1 (klein, steil)",
+        "Qw": [0, 15, 30, 45, 60],
+        "Hw": [55, 53, 48, 40, 28],
+        "eta": [0.28, 0.52, 0.68, 0.66, 0.52],
+    },
+    {
+        "id": "P2 (mittel, ausgewogen)",
+        "Qw": [0, 20, 40, 60, 80],
+        "Hw": [48, 46, 40, 30, 18],
+        "eta": [0.30, 0.60, 0.72, 0.68, 0.55],
+    },
+    {
+        "id": "P3 (höherer Durchfluss)",
+        "Qw": [0, 30, 60, 90, 120],
+        "Hw": [42, 41, 36, 26, 14],
+        "eta": [0.25, 0.55, 0.73, 0.70, 0.58],
+    },
+    {
+        "id": "P4 (höhere Förderhöhe)",
+        "Qw": [0, 15, 30, 45, 60],
+        "Hw": [70, 68, 62, 52, 40],
+        "eta": [0.22, 0.48, 0.66, 0.65, 0.50],
+    },
+    {
+        "id": "P5 (flacher, effizient im mittleren Bereich)",
+        "Qw": [0, 25, 50, 75, 100],
+        "Hw": [46, 44, 38, 28, 16],
+        "eta": [0.30, 0.62, 0.75, 0.72, 0.60],
+    },
+]
 
 # ---------------------------
 # Medium-Datenbank (typische Richtwerte)
@@ -24,7 +54,7 @@ MEDIA = {
 }
 
 # ---------------------------
-# Hilfsfunktionen
+# Helpers
 # ---------------------------
 def interp(x, xs, ys):
     """Lineare Interpolation mit Clamping am Rand."""
@@ -39,9 +69,7 @@ def interp(x, xs, ys):
             return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
     return ys[-1]
 
-
 def motor_iec(P_kW):
-    """Nächstgrößere typische IEC-Motorstufe (vereinfachte Liste)."""
     steps = [
         0.12, 0.18, 0.25, 0.37, 0.55, 0.75, 1.1, 1.5, 2.2, 3.0, 4.0, 5.5,
         7.5, 11, 15, 18.5, 22, 30, 37, 45, 55, 75
@@ -51,67 +79,48 @@ def motor_iec(P_kW):
             return s
     return steps[-1]
 
-
 # ---------------------------
 # Viskositätslogik (mit Wasser-Bypass)
 # ---------------------------
 def compute_B(Q_vis_m3h, H_vis_m, nu_cSt):
-    """Kennzahl B (Korrelationsform)."""
     Q = max(Q_vis_m3h, 1e-12)
     H = max(H_vis_m, 1e-12)
     nu = max(nu_cSt, 1e-12)
     return 280.0 * (nu ** 0.5) / ((Q ** 0.25) * (H ** 0.125))
 
-
 def viscosity_factors_from_B(B, nu_cSt, nu_water_threshold=1.5):
-    """
-    Liefert (Cq, Ch, Ceta).
-    WICHTIG: Für Wasser/dünnflüssig (ν <= threshold) keine Korrektur => C=1.
-    """
+    # Wasser-/dünnflüssig-Bypass
     if nu_cSt <= nu_water_threshold:
         return 1.0, 1.0, 1.0
 
     if B <= 1.0:
         return 1.0, 1.0, 1.0
 
-    # Cq ≈ Ch
     Cq = math.exp(-0.165 * (math.log10(B) ** 3.15))
     Cq = min(max(Cq, 0.0), 1.0)
     Ch = Cq
 
-    # Ceta (clamped)
     Beff = min(max(B, 1.0000001), 40.0)
     Ceta = Beff ** (-(0.0547 * (Beff ** 0.69)))
     Ceta = min(max(Ceta, 0.0), 1.0)
 
     return Cq, Ch, Ceta
 
-
 def viscous_to_water_equivalent(Qv, Hv, nu_cSt):
-    """
-    Rückrechnung viskos -> Wasseräquivalent:
-      Qv = Cq*Qw => Qw = Qv/Cq
-      Hv = Ch*Hw => Hw = Hv/Ch
-    Mit Wasser-Bypass.
-    """
     B = compute_B(Qv, Hv, nu_cSt)
     Cq, Ch, Ceta = viscosity_factors_from_B(B, nu_cSt)
+    if Cq <= 0 or Ch <= 0:
+        raise ValueError("Cq/Ch <= 0. Prüfe Eingaben.")
+    return {
+        "B": B, "Cq": Cq, "Ch": Ch, "Ceta": Ceta,
+        "Qw": Qv / Cq,
+        "Hw": Hv / Ch
+    }
 
-    Qw = Qv / Cq
-    Hw = Hv / Ch
-
-    return {"Qw": Qw, "Hw": Hw, "B": B, "Cq": Cq, "Ch": Ch, "Ceta": Ceta}
-
-
-def water_point_to_viscous(Qw, Hw, eta_w, nu_cSt, max_iter=50, tol=1e-10):
-    """
-    Vorwärtsumrechnung eines Wasser-Kennlinienpunktes (Qw, Hw, eta_w) -> (Qv, Hv, eta_v)
-    Iteration, weil B über viskose Größen definiert wird und Cq/Ch davon abhängen.
-    Mit Wasser-Bypass.
-    """
-    # Wasser-Bypass: bleibt identisch
+def water_point_to_viscous(Qw, Hw, eta_w, nu_cSt, max_iter=60, tol=1e-10):
+    # Wasser-Bypass
     if nu_cSt <= 1.5:
-        return Qw, Hw, eta_w, 1.0, 1.0, 1.0, 1.0
+        return Qw, Hw, max(1e-6, eta_w), 1.0, 1.0, 1.0, 1.0
 
     Qv = max(Qw, 1e-12)
     Hv = max(Hw, 1e-12)
@@ -131,154 +140,170 @@ def water_point_to_viscous(Qw, Hw, eta_w, nu_cSt, max_iter=50, tol=1e-10):
         if max(dq, dh) < tol:
             break
 
-    # final factors and eta
     B = compute_B(Qv, Hv, nu_cSt)
     Cq, Ch, Ceta = viscosity_factors_from_B(B, nu_cSt)
     eta_v = max(1e-6, Ceta * eta_w)
-
     return Qv, Hv, eta_v, B, Cq, Ch, Ceta
 
+# ---------------------------
+# Best-Pump-Auswahl
+# ---------------------------
+def choose_best_pump(pumps, Qw_target, Hw_target):
+    """
+    Auswahlkriterium:
+      - Qw_target muss im Bereich der Pumpe liegen
+      - minimiere |H_pump(Qw_target) - Hw_target|
+      - bei Gleichstand: höhere eta_w bevorzugen
+    """
+    best = None
+    for p in pumps:
+        qmin, qmax = min(p["Qw"]), max(p["Qw"])
+        if not (qmin <= Qw_target <= qmax):
+            continue
+
+        H_at = interp(Qw_target, p["Qw"], p["Hw"])
+        eta_at = interp(Qw_target, p["Qw"], p["eta"])
+        errH = abs(H_at - Hw_target)
+
+        cand = {
+            "id": p["id"],
+            "errH": errH,
+            "H_at": H_at,
+            "eta_at": eta_at,
+            "pump": p
+        }
+
+        if best is None:
+            best = cand
+        else:
+            # primär nach errH, sekundär nach höherer eta
+            if cand["errH"] < best["errH"] - 1e-9:
+                best = cand
+            elif abs(cand["errH"] - best["errH"]) <= 1e-9 and cand["eta_at"] > best["eta_at"]:
+                best = cand
+
+    if best is None:
+        raise ValueError("Keine Pumpe hat den Qw-Äquivalenzpunkt im Kennlinienbereich.")
+    return best
 
 # ---------------------------
 # Streamlit UI
 # ---------------------------
-st.set_page_config(page_title="Wasser + viskose Kennlinie", layout="centered")
-st.title("Pumpenkennlinie: Wasser vs. viskos (mit korrektem Wasser-Fall)")
+st.set_page_config(page_title="Best-Pump Auswahl + viskose Kennlinie", layout="centered")
+st.title("Viskoser Arbeitspunkt → Wasseräquivalent → beste Pumpe (aus 5 Kennlinien)")
 
 with st.sidebar:
     st.header("Anforderung im Medium (viskos)")
-    Qv_req = st.number_input("Qν (gefordert) [m³/h]", min_value=0.1, max_value=200.0, value=40.0, step=1.0)
-    Hv_req = st.number_input("Hν (gefordert) [m]", min_value=0.1, max_value=200.0, value=35.0, step=1.0)
+    Qv_req = st.number_input("Qν (gefordert) [m³/h]", min_value=0.1, max_value=250.0, value=40.0, step=1.0)
+    Hv_req = st.number_input("Hν (gefordert) [m]", min_value=0.1, max_value=250.0, value=35.0, step=1.0)
 
     st.header("Medium")
     mk = st.selectbox("Medium auswählen", list(MEDIA.keys()), index=0)
-    rho_default, nu_default = MEDIA[mk]
-    rho = st.number_input("ρ [kg/m³] (anpassbar)", min_value=1.0, value=float(rho_default), step=5.0)
-    nu = st.number_input("ν [cSt] (anpassbar)", min_value=0.1, value=float(nu_default), step=0.5)
+    rho_def, nu_def = MEDIA[mk]
+    rho = st.number_input("ρ [kg/m³] (anpassbar)", min_value=1.0, value=float(rho_def), step=5.0)
+    nu = st.number_input("ν [cSt] (anpassbar)", min_value=0.1, value=float(nu_def), step=0.5)
 
     st.header("Motorreserve")
     reserve_pct = st.slider("Reserve [%]", 0, 30, 15)
 
-# ---------------------------
-# 1) Rückrechnung Arbeitspunkt viskos -> Wasseräquivalent
-# ---------------------------
+# 1) Rückrechnung viskos -> Wasseräquivalent
 conv = viscous_to_water_equivalent(Qv_req, Hv_req, nu_cSt=nu)
-Qw_eq = conv["Qw"]
-Hw_eq = conv["Hw"]
-B_req = conv["B"]
-Cq_req, Ch_req, Ceta_req = conv["Cq"], conv["Ch"], conv["Ceta"]
+Qw_eq, Hw_eq = conv["Qw"], conv["Hw"]
+B_req, Cq_req, Ch_req, Ceta_req = conv["B"], conv["Cq"], conv["Ch"], conv["Ceta"]
 
-# Wasserkennlinie am äquivalenten Durchfluss auswerten (zur Plausibilisierung)
-H_w_curve_at_Qw = interp(Qw_eq, PUMP_QW, PUMP_HW)
-eta_w_at_Qw = interp(Qw_eq, PUMP_QW, PUMP_ETAW)
+if nu <= 1.5:
+    st.info("Medium ~ Wasser: Korrekturfaktoren werden auf 1 gesetzt → Qw=Qν und Hw=Hν.")
 
-# Viskoser Wirkungsgrad am Arbeitspunkt (aus Ceta und Wasser-eta am äquivalenten Punkt)
-eta_v_req = max(1e-6, Ceta_req * eta_w_at_Qw)
+st.subheader("1) Wasseräquivalenzpunkt (für Pumpenauswahl)")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Qw [m³/h]", f"{Qw_eq:.2f}")
+c2.metric("Hw [m]", f"{Hw_eq:.2f}")
+c3.metric("Cq / Ch", f"{Cq_req:.3f} / {Ch_req:.3f}")
+c4.metric("B [-]", f"{B_req:.2f}")
 
-# Leistung / Motor für viskosen Betriebspunkt (Qv_req, Hv_req)
+# 2) Beste Pumpe auswählen
+best = choose_best_pump(PUMPS, Qw_target=Qw_eq, Hw_target=Hw_eq)
+p = best["pump"]
+
+st.divider()
+st.subheader("2) Beste Pumpe (Wasserkennlinie)")
+c1, c2, c3 = st.columns(3)
+c1.metric("Ausgewählte Pumpe", best["id"])
+c2.metric("H_pump(Qw) [m]", f"{best['H_at']:.2f}")
+c3.metric("|ΔH| [m]", f"{best['errH']:.2f}")
+st.write(f"ηw(Qw) ≈ **{best['eta_at']:.3f}**")
+
+# 3) Motorleistung im viskosen Arbeitspunkt (η viskos = Ceta * ηw am Qw)
+eta_v_req = max(1e-6, Ceta_req * best["eta_at"])
 P_hyd_W = float(rho) * G * (float(Qv_req) / 3600.0) * float(Hv_req)
 P_vis_kW = (P_hyd_W / eta_v_req) / 1000.0
 P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
 
-st.subheader("Ergebnis Arbeitspunkt & Motor")
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Qw (äquiv.) [m³/h]", f"{Qw_eq:.2f}")
-c2.metric("Hw (äquiv.) [m]", f"{Hw_eq:.2f}")
-c3.metric("Cq / Ch", f"{Cq_req:.3f} / {Ch_req:.3f}")
-c4.metric("B (am Arbeitspunkt)", f"{B_req:.2f}")
-
-st.write(f"ηw(Qw) ≈ **{eta_w_at_Qw:.3f}**,  ην ≈ **{eta_v_req:.3f}**")
-st.write(f"Leistung viskos: **{P_vis_kW:.2f} kW**")
-st.write(f"Motor (+{reserve_pct}%): **{P_motor_kW:.2f} kW (IEC)**")
-
-if nu <= 1.5:
-    st.info("Medium ist (nahe) Wasser → Korrekturfaktoren werden auf 1 gesetzt → Qν = Qw und Hν = Hw.")
-
 st.divider()
+st.subheader("3) Motor (viskoser Betrieb)")
+c1, c2, c3 = st.columns(3)
+c1.metric("ην [-]", f"{eta_v_req:.3f}")
+c2.metric("Pν [kW]", f"{P_vis_kW:.2f}")
+c3.metric(f"Motor +{reserve_pct}% [kW]", f"{P_motor_kW:.2f}")
 
-# ---------------------------
-# 2) Viskose Kennlinie aus Wasserkennlinie erzeugen (punktweise Umrechnung)
-# ---------------------------
-Qv_curve = []
-Hv_curve = []
-eta_v_curve = []
-meta_curve = []  # optional: B, Cq, Ch, Ceta pro Punkt
-
-for Qw_i, Hw_i, eta_w_i in zip(PUMP_QW, PUMP_HW, PUMP_ETAW):
-    Qv_i, Hv_i, eta_v_i, B_i, Cq_i, Ch_i, Ceta_i = water_point_to_viscous(
-        Qw_i, Hw_i, eta_w_i, nu_cSt=nu
-    )
+# 4) Viskose Kennlinie der ausgewählten Pumpe erzeugen
+Qv_curve, Hv_curve, eta_v_curve = [], [], []
+for Qw_i, Hw_i, eta_w_i in zip(p["Qw"], p["Hw"], p["eta"]):
+    Qv_i, Hv_i, eta_v_i, *_ = water_point_to_viscous(Qw_i, Hw_i, eta_w_i, nu_cSt=nu)
     Qv_curve.append(Qv_i)
     Hv_curve.append(Hv_i)
     eta_v_curve.append(eta_v_i)
-    meta_curve.append((B_i, Cq_i, Ch_i, Ceta_i))
 
-# Für Markierung: Kennlinienwert im viskosen Plot bei Qv_req
-# (Interpolation auf viskoser Kennlinie)
-# Hinweis: Qv_curve muss monoton sein; bei dieser typischen Kurve ist das i. d. R. gegeben.
-Hv_vis_curve_at_Qv = interp(Qv_req, Qv_curve, Hv_curve)
-eta_vis_curve_at_Qv = interp(Qv_req, Qv_curve, eta_v_curve)
+# Interpolierte Punkte auf ausgewählter Kennlinie (Wasser/viskos) für Markierungen
+H_w_curve_at_Qw = interp(Qw_eq, p["Qw"], p["Hw"])
+eta_w_curve_at_Qw = interp(Qw_eq, p["Qw"], p["eta"])
+H_v_curve_at_Qv = interp(Qv_req, Qv_curve, Hv_curve)
+eta_v_curve_at_Qv = interp(Qv_req, Qv_curve, eta_v_curve)
 
-# ---------------------------
-# 3) Visualisierung: Q-H (Wasser + viskos)
-# ---------------------------
-st.subheader("Visualisierung: Q-H und Q-η (Wasser vs. viskos)")
+st.divider()
+st.subheader("Kennlinien-Visualisierung (alle Pumpen + ausgewählte Pumpe hervorgehoben)")
 
+# Plot Q-H
 fig1, ax1 = plt.subplots()
-ax1.plot(PUMP_QW, PUMP_HW, marker="o", linestyle="-", label="H(Q) Wasser (typ.)")
-ax1.plot(Qv_curve, Hv_curve, marker="o", linestyle="-", label="Hν(Qν) viskos (umgerechnet)")
-
-# Markiere Arbeitspunkt viskos und Wasseräquivalent
-ax1.scatter([Qv_req], [Hv_req], marker="x", s=80, label="Arbeitspunkt viskos (Qν,Hν)")
+for pp in PUMPS:
+    ax1.plot(pp["Qw"], pp["Hw"], marker="o", linestyle="-", label=pp["id"])
 ax1.scatter([Qw_eq], [Hw_eq], marker="^", s=70, label="Wasseräquivalent (Qw,Hw)")
+ax1.scatter([Qv_req], [Hv_req], marker="x", s=80, label="Arbeitspunkt viskos (Qν,Hν)")
+ax1.scatter([Qw_eq], [H_w_curve_at_Qw], marker="s", s=55, label="H_w auf ausgewählter Kennlinie")
+ax1.scatter([Qv_req], [H_v_curve_at_Qv], marker="s", s=55, label="H_ν auf viskoser Kennlinie")
 
-# Markiere Kennlinienwerte an denselben Durchflüssen (zur Plausibilisierung)
-ax1.scatter([Qw_eq], [H_w_curve_at_Qw], marker="s", s=55, label="Wasserkennlinie bei Qw")
-ax1.scatter([Qv_req], [Hv_vis_curve_at_Qv], marker="s", s=55, label="Viskose Kennlinie bei Qν")
+# Zusätzlich: viskose Kennlinie der ausgewählten Pumpe
+ax1.plot(Qv_curve, Hv_curve, marker="o", linestyle="--", label=f"{best['id']} (viskos)")
 
 ax1.set_xlabel("Q [m³/h]")
 ax1.set_ylabel("H [m]")
-ax1.set_title("Q-H: Wasserkennlinie und viskose Kennlinie")
+ax1.set_title("Q-H: 5 Wasserkennlinien + viskose Kennlinie der Auswahl")
 ax1.grid(True)
 ax1.legend()
 st.pyplot(fig1, clear_figure=True)
 
-# ---------------------------
-# 4) Visualisierung: Q-η (Wasser + viskos)
-# ---------------------------
+# Plot Q-eta
 fig2, ax2 = plt.subplots()
-ax2.plot(PUMP_QW, PUMP_ETAW, marker="o", linestyle="-", label="η(Q) Wasser (typ.)")
-ax2.plot(Qv_curve, eta_v_curve, marker="o", linestyle="-", label="ην(Qν) viskos (umgerechnet)")
-
-ax2.scatter([Qw_eq], [eta_w_at_Qw], marker="x", s=80, label="ηw bei Qw")
+for pp in PUMPS:
+    ax2.plot(pp["Qw"], pp["eta"], marker="o", linestyle="-", label=pp["id"])
+ax2.scatter([Qw_eq], [eta_w_curve_at_Qw], marker="x", s=80, label="ηw bei Qw (Auswahl)")
 ax2.scatter([Qv_req], [eta_v_req], marker="^", s=70, label="ην am Arbeitspunkt")
-
-ax2.scatter([Qv_req], [eta_vis_curve_at_Qv], marker="s", s=55, label="Viskose Kennlinie bei Qν")
+ax2.plot(Qv_curve, eta_v_curve, marker="o", linestyle="--", label=f"{best['id']} (viskos η)")
 
 ax2.set_xlabel("Q [m³/h]")
 ax2.set_ylabel("η [-]")
-ax2.set_title("Q-η: Wasserkennlinie und viskose (korrigierte) Kennlinie")
+ax2.set_title("Q-η: 5 Wasserkennlinien + viskose η-Kennlinie der Auswahl")
 ax2.grid(True)
 ax2.legend()
 st.pyplot(fig2, clear_figure=True)
 
-# ---------------------------
-# 5) Optional: Detailtabelle für viskose Kennlinie
-# ---------------------------
-with st.expander("Details: umgerechnete viskose Kennlinienpunkte"):
-    rows = []
-    for (Qw_i, Hw_i, eta_w_i, Qv_i, Hv_i, eta_v_i, meta) in zip(
-        PUMP_QW, PUMP_HW, PUMP_ETAW, Qv_curve, Hv_curve, eta_v_curve, meta_curve
-    ):
-        B_i, Cq_i, Ch_i, Ceta_i = meta
-        rows.append({
-            "Qw": Qw_i, "Hw": Hw_i, "ηw": round(eta_w_i, 4),
-            "Qν": round(Qv_i, 4), "Hν": round(Hv_i, 4), "ην": round(eta_v_i, 4),
-            "B": round(B_i, 4), "Cq": round(Cq_i, 4), "Ch": round(Ch_i, 4), "Cη": round(Ceta_i, 4)
-        })
-    st.dataframe(rows, use_container_width=True)
-
-st.caption(
-    "Hinweis: Die Wasserkennlinie ist eine typische Demonstrationskennlinie. "
-    "Für reale Auslegung müssen herstellerspezifische Kennlinien hinterlegt werden."
-)
+with st.expander("Kurz-Rechengang"):
+    st.markdown(
+        f"""
+- Eingabe (viskos): **Qν={Qv_req:.2f} m³/h**, **Hν={Hv_req:.2f} m**, **ν={nu:.2f} cSt**, **ρ={rho:.1f} kg/m³**
+- Umrechnung: B={B_req:.2f} → Cq={Cq_req:.3f}, Ch={Ch_req:.3f}, Cη={Ceta_req:.3f}
+- Wasseräquivalent: **Qw=Qν/Cq={Qw_eq:.2f}**, **Hw=Hν/Ch={Hw_eq:.2f}**
+- Pumpenauswahl: minimiere |H_pump(Qw) − Hw| → **{best['id']}**, |ΔH|={best['errH']:.2f} m
+- Motor: ην=Cη·ηw(Qw)={eta_v_req:.3f} → Pν=ρgQνHν/ην={P_vis_kW:.2f} kW → Motor (Reserve)={P_motor_kW:.2f} kW
+"""
+    )
