@@ -1,8 +1,7 @@
 import math
 import streamlit as st
 import matplotlib.pyplot as plt
-
-from iapws import IAPWS97  # IF97 steam tables
+from iapws import IAPWS97  # IAPWS-IF97 steam tables
 
 G = 9.80665  # m/s²
 
@@ -65,10 +64,8 @@ def clamp(x, a, b):
     return max(a, min(b, x))
 
 def motor_iec(P_kW):
-    steps = [
-        0.12, 0.18, 0.25, 0.37, 0.55, 0.75, 1.1, 1.5, 2.2, 3.0, 4.0, 5.5,
-        7.5, 11, 15, 18.5, 22, 30, 37, 45, 55, 75
-    ]
+    steps = [0.12, 0.18, 0.25, 0.37, 0.55, 0.75, 1.1, 1.5, 2.2, 3.0, 4.0, 5.5,
+             7.5, 11, 15, 18.5, 22, 30, 37, 45, 55, 75]
     for s in steps:
         if P_kW <= s:
             return s
@@ -84,8 +81,10 @@ def compute_B(Q_vis_m3h, H_vis_m, nu_cSt):
     return 280.0 * (nu ** 0.5) / ((Q ** 0.25) * (H ** 0.125))
 
 def viscosity_factors_from_B(B, nu_cSt, nu_water_threshold=1.5):
+    # Wasser-/dünnflüssig-Bypass: Referenzkennlinie ist Wasser -> keine Korrektur
     if nu_cSt <= nu_water_threshold:
         return 1.0, 1.0, 1.0
+
     if B <= 1.0:
         return 1.0, 1.0, 1.0
 
@@ -116,6 +115,7 @@ def water_point_to_viscous(Qw, Hw, eta_w, nu_cSt, max_iter=60, tol=1e-10):
     for _ in range(max_iter):
         B = compute_B(Qv, Hv, nu_cSt)
         Cq, Ch, Ceta = viscosity_factors_from_B(B, nu_cSt)
+
         Qv_new = max(1e-12, Cq * Qw)
         Hv_new = max(1e-12, Ch * Hw)
 
@@ -148,7 +148,7 @@ def choose_best_pump_robust(pumps, Qw_target, Hw_target, allow_out_of_range=True
         if not in_range:
             Q_eval = clamp(Qw_target, qmin, qmax)
             span = max(qmax - qmin, 1e-9)
-            penalty = abs(Qw_target - Q_eval) / span * 10.0  # 10 m virtuelle Strafe
+            penalty = abs(Qw_target - Q_eval) / span * 10.0  # "virtuelle" Strafe
 
         H_at = interp_clamped(Q_eval, p["Qw"], p["Hw"])
         eta_at = interp_clamped(Q_eval, p["Qw"], p["eta"])
@@ -156,9 +156,9 @@ def choose_best_pump_robust(pumps, Qw_target, Hw_target, allow_out_of_range=True
         score = errH + penalty
 
         cand = {
-            "id": p["id"], "pump": p,
-            "in_range": in_range, "Q_eval": Q_eval, "penalty": penalty,
-            "H_at": H_at, "eta_at": eta_at, "errH": errH, "score": score
+            "id": p["id"], "pump": p, "in_range": in_range,
+            "Q_eval": Q_eval, "penalty": penalty,
+            "H_at": H_at, "eta_at": eta_at, "errH": errH, "score": score,
         }
 
         if best is None:
@@ -172,58 +172,63 @@ def choose_best_pump_robust(pumps, Qw_target, Hw_target, allow_out_of_range=True
     return best
 
 # ---------------------------
-# Sättigungs-Rechner (IF97)
+# Sättigung (IAPWS-IF97)
 # ---------------------------
 def sat_temperature_from_pressure(p_bar_abs: float) -> float:
-    """Sättigungstemperatur [°C] aus absolutem Druck [bar]."""
     p_mpa = p_bar_abs * 0.1
     w = IAPWS97(P=p_mpa, x=0)  # saturated liquid
     return w.T - 273.15
 
 def sat_pressure_from_temperature(t_c: float) -> float:
-    """Sättigungsdruck [bar abs] aus Temperatur [°C]."""
     w = IAPWS97(T=t_c + 273.15, x=0)
     return w.P * 10.0  # MPa -> bar
 
 # ---------------------------
-# UI
+# App Layout + Navigation per Buttons
 # ---------------------------
 st.set_page_config(page_title="Mehrphasen-Auslegung: Pumpe + Sättigung", layout="centered")
-st.title("Auslegung: viskoser Arbeitspunkt + Sättigung (Mehrphasen)")
+st.title("Auslegung: viskos / Kennlinien + Sättigung (Mehrphasen)")
 
-tab1, tab2 = st.tabs(["1) Pumpenauswahl & Kennlinien", "2) Sättigungskalkulator Wasser"])
+if "page" not in st.session_state:
+    st.session_state.page = "pump"
+
+with st.sidebar:
+    st.header("Navigation")
+    colA, colB = st.columns(2)
+    if colA.button("Pumpen", use_container_width=True):
+        st.session_state.page = "pump"
+    if colB.button("Sättigung", use_container_width=True):
+        st.session_state.page = "sat"
+
+    st.caption(f"Aktiver Bereich: **{ 'Pumpen' if st.session_state.page=='pump' else 'Sättigung' }**")
 
 # =========================================================
-# TAB 1
+# PAGE 1: PUMPEN
 # =========================================================
-with tab1:
+if st.session_state.page == "pump":
+    st.subheader("Pumpenauswahl & Kennlinien (Wasser ↔ viskos)")
+
     with st.sidebar:
-        st.header("Pumpen-Tab: Eingaben")
+        st.divider()
+        st.subheader("Eingaben (Pumpen)")
+        Qv_req = st.number_input("Qν (gefordert) [m³/h]", min_value=0.1, max_value=300.0, value=40.0, step=1.0)
+        Hv_req = st.number_input("Hν (gefordert) [m]", min_value=0.1, max_value=300.0, value=35.0, step=1.0)
 
-        st.subheader("Anforderung im Medium (viskos)")
-        Qv_req = st.number_input("Qν (gefordert) [m³/h]", min_value=0.1, max_value=300.0, value=40.0, step=1.0, key="Qv_req")
-        Hv_req = st.number_input("Hν (gefordert) [m]", min_value=0.1, max_value=300.0, value=35.0, step=1.0, key="Hv_req")
-
-        st.subheader("Medium")
-        mk = st.selectbox("Medium auswählen", list(MEDIA.keys()), index=0, key="mk")
+        mk = st.selectbox("Medium", list(MEDIA.keys()), index=0)
         rho_def, nu_def = MEDIA[mk]
-        rho = st.number_input("ρ [kg/m³] (anpassbar)", min_value=1.0, value=float(rho_def), step=5.0, key="rho")
-        nu = st.number_input("ν [cSt] (anpassbar)", min_value=0.1, value=float(nu_def), step=0.5, key="nu")
+        rho = st.number_input("ρ [kg/m³]", min_value=1.0, value=float(rho_def), step=5.0)
+        nu = st.number_input("ν [cSt]", min_value=0.1, value=float(nu_def), step=0.5)
 
-        st.subheader("Auswahlverhalten")
-        allow_out = st.checkbox("Wenn Qw außerhalb liegt: trotzdem 'Best fit' wählen", value=True, key="allow_out")
-
-        st.subheader("Motorreserve")
-        reserve_pct = st.slider("Reserve [%]", 0, 30, 15, key="reserve_pct")
+        allow_out = st.checkbox("Best fit auch wenn Qw außerhalb liegt", value=True)
+        reserve_pct = st.slider("Motorreserve [%]", 0, 30, 15)
 
     conv = viscous_to_water_equivalent(Qv_req, Hv_req, nu_cSt=nu)
     Qw_eq, Hw_eq = conv["Qw"], conv["Hw"]
     B_req, Cq_req, Ch_req, Ceta_req = conv["B"], conv["Cq"], conv["Ch"], conv["Ceta"]
 
     if nu <= 1.5:
-        st.info("Medium ~ Wasser: Korrekturfaktoren werden auf 1 gesetzt → Qw=Qν und Hw=Hν.")
+        st.info("Medium ~ Wasser: Korrekturfaktoren = 1 → Qw=Qν und Hw=Hν.")
 
-    st.subheader("1) Wasseräquivalenzpunkt (für Pumpenauswahl)")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Qw [m³/h]", f"{Qw_eq:.2f}")
     c2.metric("Hw [m]", f"{Hw_eq:.2f}")
@@ -232,11 +237,12 @@ with tab1:
 
     best = choose_best_pump_robust(PUMPS, Qw_target=Qw_eq, Hw_target=Hw_eq, allow_out_of_range=allow_out)
     if best is None:
-        st.error("Keine Pumpe konnte bewertet werden (unerwartet).")
+        st.error("Keine Pumpe konnte bewertet werden.")
         st.stop()
 
+    p = best["pump"]
+
     st.divider()
-    st.subheader("2) Beste Pumpe (Wasserkennlinie)")
     c1, c2, c3 = st.columns(3)
     c1.metric("Ausgewählte Pumpe", best["id"])
     c2.metric("H_pump(Q) [m]", f"{best['H_at']:.2f}")
@@ -244,44 +250,39 @@ with tab1:
     st.write(f"ηw(Q) ≈ **{best['eta_at']:.3f}**")
 
     if not best["in_range"]:
-        p = best["pump"]
         st.warning(
             f"Qw={Qw_eq:.2f} liegt außerhalb der Kennlinie (Range: {min(p['Qw'])}…{max(p['Qw'])}). "
-            "Es wurde am Rand ausgewertet und eine Strafbewertung genutzt."
+            "Auswertung am Rand + Strafbewertung."
         )
 
+    # Leistung / Motor am viskosen Betriebspunkt
     eta_v_req = max(1e-6, Ceta_req * best["eta_at"])
     P_hyd_W = float(rho) * G * (float(Qv_req) / 3600.0) * float(Hv_req)
     P_vis_kW = (P_hyd_W / eta_v_req) / 1000.0
     P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
 
     st.divider()
-    st.subheader("3) Motor (viskoser Betrieb)")
     c1, c2, c3 = st.columns(3)
     c1.metric("ην [-]", f"{eta_v_req:.3f}")
     c2.metric("Pν [kW]", f"{P_vis_kW:.2f}")
     c3.metric(f"Motor +{reserve_pct}% [kW]", f"{P_motor_kW:.2f}")
 
-    # Viskose Kennlinie der ausgewählten Pumpe erzeugen (nur diese Pumpe)
-    p = best["pump"]
+    # viskose Kennlinie der ausgewählten Pumpe erzeugen
     Qv_curve, Hv_curve, eta_v_curve = [], [], []
     for Qw_i, Hw_i, eta_w_i in zip(p["Qw"], p["Hw"], p["eta"]):
         Qv_i, Hv_i, eta_v_i = water_point_to_viscous(Qw_i, Hw_i, eta_w_i, nu_cSt=nu)
-        Qv_curve.append(Qv_i)
-        Hv_curve.append(Hv_i)
-        eta_v_curve.append(eta_v_i)
+        Qv_curve.append(Qv_i); Hv_curve.append(Hv_i); eta_v_curve.append(eta_v_i)
 
-    # Markerpunkte (clamp für plot)
+    # Marker (clamp)
     Qw_plot = clamp(Qw_eq, min(p["Qw"]), max(p["Qw"]))
     H_w_curve_at_Qw = interp_clamped(Qw_plot, p["Qw"], p["Hw"])
     eta_w_curve_at_Qw = interp_clamped(Qw_plot, p["Qw"], p["eta"])
-
     Qv_plot = clamp(Qv_req, min(Qv_curve), max(Qv_curve))
     H_v_curve_at_Qv = interp_clamped(Qv_plot, Qv_curve, Hv_curve)
     eta_v_curve_at_Qv = interp_clamped(Qv_plot, Qv_curve, eta_v_curve)
 
     st.divider()
-    st.subheader("Kennlinien-Visualisierung")
+    st.subheader("Kennlinien (Q-H und Q-η)")
 
     fig1, ax1 = plt.subplots()
     for pp in PUMPS:
@@ -291,13 +292,11 @@ with tab1:
     ax1.scatter([Qw_eq], [Hw_eq], marker="^", s=70, label="Wasseräquivalent (Qw,Hw)")
     ax1.scatter([Qv_req], [Hv_req], marker="x", s=80, label="Arbeitspunkt viskos (Qν,Hν)")
     ax1.scatter([Qw_plot], [H_w_curve_at_Qw], marker="s", s=55, label="H_w auf Auswahlkennlinie")
-    ax1.scatter([Qv_plot], [H_v_curve_at_Qv], marker="s", s=55, label="H_ν auf viskoser Auswahlkennlinie")
+    ax1.scatter([Qv_plot], [H_v_curve_at_Qv], marker="s", s=55, label="H_ν auf viskoser Kennlinie")
 
-    ax1.set_xlabel("Q [m³/h]")
-    ax1.set_ylabel("H [m]")
-    ax1.set_title("Q-H: 5 Wasserkennlinien + viskose Kennlinie der Auswahl")
-    ax1.grid(True)
-    ax1.legend()
+    ax1.set_xlabel("Q [m³/h]"); ax1.set_ylabel("H [m]")
+    ax1.set_title("Q-H: Wasserkennlinien + viskose Kennlinie der Auswahl")
+    ax1.grid(True); ax1.legend()
     st.pyplot(fig1, clear_figure=True)
 
     fig2, ax2 = plt.subplots()
@@ -307,77 +306,169 @@ with tab1:
 
     ax2.scatter([Qw_plot], [eta_w_curve_at_Qw], marker="x", s=80, label="ηw auf Auswahlkennlinie")
     ax2.scatter([Qv_req], [eta_v_req], marker="^", s=70, label="ην am Arbeitspunkt")
-    ax2.scatter([Qv_plot], [eta_v_curve_at_Qv], marker="s", s=55, label="ην auf viskoser Auswahlkennlinie")
+    ax2.scatter([Qv_plot], [eta_v_curve_at_Qv], marker="s", s=55, label="ην auf viskoser Kennlinie")
 
-    ax2.set_xlabel("Q [m³/h]")
-    ax2.set_ylabel("η [-]")
-    ax2.set_title("Q-η: 5 Wasserkennlinien + viskose η-Kennlinie der Auswahl")
-    ax2.grid(True)
-    ax2.legend()
+    ax2.set_xlabel("Q [m³/h]"); ax2.set_ylabel("η [-]")
+    ax2.set_title("Q-η: Wasserkennlinien + viskose η-Kennlinie der Auswahl")
+    ax2.grid(True); ax2.legend()
     st.pyplot(fig2, clear_figure=True)
 
+    # ---------------------------
+    # Rechenweg (unten, ausführlich)
+    # ---------------------------
+    st.divider()
+    st.subheader("Rechenweg & Normbezug (Pumpen/viskos)")
+
+    st.markdown(
+        f"""
+**Ziel:** Aus einem geforderten viskosen Betriebspunkt \\((Q_\\nu, H_\\nu)\\) auf Basis einer **Wasser-Referenzkennlinie** eine passende Pumpe auswählen und den Betrieb auf viskos abschätzen.
+
+### A) Referenz: Wasser-Kennlinie / Gültigkeitsbereich
+- Herstellerkennlinien und Abnahmemessungen sind typischerweise **für Wasser** definiert; Normen wie **DIN EN ISO 9906** beziehen sich explizit auf Pumpflüssigkeiten, die sich wie „sauberes, kaltes Wasser“ verhalten.  
+  → Deshalb ist die Wasserkennlinie die Referenzbasis, und Viskositätskorrekturen sind eine **Umrechnung gegenüber Wasser**.
+
+### B) Schritt 1 — Umrechnung viskos → Wasseräquivalent
+1. Eingaben:  
+   \\(Q_\\nu\\) [m³/h], \\(H_\\nu\\) [m], kinematische Viskosität \\(\\nu\\) [cSt], Dichte \\(\\rho\\) [kg/m³]
+2. Bestimme Kennzahl \\(B\\) (empirische Korrelation; hier wie im Tool implementiert):  
+   \\[
+   B = 280 \\cdot \\frac{\\nu^{0.5}}{Q_\\nu^{0.25} \\cdot H_\\nu^{0.125}}
+   \\]
+3. Bestimme Korrekturfaktoren \\(C_Q, C_H, C_\\eta\\) aus \\(B\\).  
+   - Bei „dünnflüssig“ (hier: \\(\\nu \\le 1.5\\,cSt\\)) wird **per Definition** gesetzt:  
+     \\(C_Q=C_H=C_\\eta=1\\) → **keine Korrektur** (Wasser-Bypass).
+4. Wasseräquivalenzpunkt:  
+   \\[
+   Q_w = \\frac{Q_\\nu}{C_Q}, \\qquad H_w = \\frac{H_\\nu}{C_H}
+   \\]
+
+**Interpretation:** \\((Q_w, H_w)\\) ist der Punkt, den die Pumpe auf der **Wasserkennlinie** ungefähr liefern müsste, damit sie bei viskosem Medium \\((Q_\\nu, H_\\nu)\\) erreicht.
+
+### C) Schritt 2 — Pumpenauswahl über Wasserkennlinien
+- Für jede Pumpe wird \\(H_{pump}(Q_w)\\) interpoliert und die Abweichung gebildet:  
+  \\[
+  \\Delta H = |H_{pump}(Q_w) - H_w|
+  \\]
+- **Beste Pumpe** = kleinste \\(\\Delta H\\) (bei Gleichstand: höhere \\(\\eta_w(Q_w)\\)).  
+- Liegt \\(Q_w\\) außerhalb der Kennlinie, kann optional „Best fit“ am Rand (clamp) mit Strafterm erfolgen (damit die App nicht abbricht).
+
+### D) Schritt 3 — Wirkungsgrad und Motorleistung am viskosen Betriebspunkt
+1. Wasserwirkungsgrad am Auswahlpunkt: \\(\\eta_w(Q_w)\\) (Interpoliert)
+2. Viskoser Wirkungsgrad (Korrektur):  
+   \\[
+   \\eta_\\nu = C_\\eta \\cdot \\eta_w(Q_w)
+   \\]
+3. Hydraulische Leistung:  
+   \\[
+   P_{hyd} = \\rho g \\cdot \\left(\\frac{Q_\\nu}{3600}\\right) \\cdot H_\\nu
+   \\]
+4. Wellenleistung (vereinfachte Abschätzung):  
+   \\[
+   P_\\nu = \\frac{P_{hyd}}{\\eta_\\nu}
+   \\]
+5. Motorreserve und IEC-Stufe:  
+   \\[
+   P_{Motor} = P_\\nu \\cdot (1+\\text{Reserve})
+   \\]
+
+**Hinweise / Grenzen (wichtig für die Präsentation):**
+- Viskositätskorrekturen gelten für **Newtonsche** Flüssigkeiten und „konventionelle“ Pumpendesigns (die klassischen Leitfäden adressieren diesen Bereich).
+- Wenn der Hersteller bereits **viskose Kennlinien** bereitstellt: nicht doppelt korrigieren (sonst doppelte Berücksichtigung).
+"""
+    )
+
 # =========================================================
-# TAB 2
+# PAGE 2: SÄTTIGUNG
 # =========================================================
-with tab2:
-    st.subheader("Sättigungskalkulator Wasser unter Druck (IF97)")
-    st.caption("Für Mehrphasenpumpen ist entscheidend, ob bei gegebenem Druck die Betriebstemperatur über der Sättigung liegt (Flash/Boiling-Risiko).")
+else:
+    st.subheader("Sättigungskalkulator Wasser unter Druck (Mehrphasen)")
 
-    mode = st.radio("Berechnung", ["Sättigungstemperatur aus Druck", "Sättigungsdruck aus Temperatur"], horizontal=True)
+    with st.sidebar:
+        st.divider()
+        st.subheader("Eingaben (Sättigung)")
+        mode = st.radio("Berechnung", ["T_sätt aus p_abs", "p_sätt aus T"], index=0)
 
-    colA, colB = st.columns(2)
-
-    if mode == "Sättigungstemperatur aus Druck":
-        with colA:
-            p_bar_abs = st.number_input("Absolutdruck p_abs [bar]", min_value=0.01, max_value=300.0, value=1.013, step=0.1)
-            t_op = st.number_input("Betriebstemperatur T_op [°C] (optional)", min_value=-20.0, max_value=400.0, value=20.0, step=1.0)
+    if mode == "T_sätt aus p_abs":
+        col1, col2 = st.columns(2)
+        with col1:
+            p_bar_abs = st.number_input("Absolutdruck p_abs [bar]", min_value=0.01, max_value=1000.0, value=1.013, step=0.1)
+            t_op = st.number_input("Betriebstemperatur T_op [°C]", min_value=-20.0, max_value=800.0, value=20.0, step=1.0)
             margin = st.number_input("Sicherheitsabstand ΔT [K]", min_value=0.0, max_value=50.0, value=5.0, step=0.5)
 
         try:
             t_sat = sat_temperature_from_pressure(float(p_bar_abs))
-            with colB:
+            with col2:
                 st.metric("T_sätt [°C]", f"{t_sat:.2f}")
-                st.write(f"Sättigung bei p_abs={p_bar_abs:.3f} bar: **T_sätt ≈ {t_sat:.2f} °C**")
-
                 dt = t_sat - float(t_op)
                 st.metric("ΔT = T_sätt - T_op [K]", f"{dt:.2f}")
+
                 if dt < 0:
-                    st.error("T_op liegt über T_sätt → Flash/Boiling sehr wahrscheinlich (Mehrphasenbildung).")
+                    st.error("T_op > T_sätt → Flash/Boiling sehr wahrscheinlich (Mehrphasenbildung).")
                 elif dt < margin:
-                    st.warning("T_op liegt nahe an T_sätt → geringe Reserve, Mehrphasen-/Kavitationsrisiko steigt.")
+                    st.warning("T_op nahe T_sätt → geringe Reserve, Mehrphasen-/Kavitationsrisiko steigt.")
                 else:
                     st.success("Ausreichende thermische Reserve zur Sättigung (bezogen auf p_abs).")
-
         except Exception as e:
-            st.error(f"Berechnung fehlgeschlagen (IF97): {e}")
+            st.error(f"IF97-Berechnung fehlgeschlagen: {e}")
 
     else:
-        with colA:
-            t_c = st.number_input("Temperatur T [°C]", min_value=-20.0, max_value=400.0, value=100.0, step=1.0)
-            p_op = st.number_input("Betriebsdruck p_abs [bar] (optional)", min_value=0.01, max_value=300.0, value=1.013, step=0.1)
+        col1, col2 = st.columns(2)
+        with col1:
+            t_c = st.number_input("Temperatur T [°C]", min_value=-20.0, max_value=800.0, value=100.0, step=1.0)
+            p_op = st.number_input("Betriebsdruck p_abs [bar]", min_value=0.01, max_value=1000.0, value=1.013, step=0.1)
             margin_p = st.number_input("Sicherheitsabstand Δp [bar]", min_value=0.0, max_value=50.0, value=0.2, step=0.05)
 
         try:
             p_sat = sat_pressure_from_temperature(float(t_c))
-            with colB:
+            with col2:
                 st.metric("p_sätt [bar abs]", f"{p_sat:.3f}")
-                st.write(f"Sättigung bei T={t_c:.2f} °C: **p_sätt ≈ {p_sat:.3f} bar(abs)**")
-
                 dp = float(p_op) - p_sat
                 st.metric("Δp = p_op - p_sätt [bar]", f"{dp:.3f}")
+
                 if dp < 0:
-                    st.error("p_op liegt unter p_sätt → Flash/Boiling sehr wahrscheinlich (Mehrphasenbildung).")
+                    st.error("p_op < p_sätt → Flash/Boiling sehr wahrscheinlich (Mehrphasenbildung).")
                 elif dp < margin_p:
-                    st.warning("p_op liegt nahe an p_sätt → geringe Druckreserve, Mehrphasen-/Kavitationsrisiko steigt.")
+                    st.warning("p_op nahe p_sätt → geringe Druckreserve, Mehrphasen-/Kavitationsrisiko steigt.")
                 else:
                     st.success("Ausreichende Druckreserve zur Sättigung.")
-
         except Exception as e:
-            st.error(f"Berechnung fehlgeschlagen (IF97): {e}")
+            st.error(f"IF97-Berechnung fehlgeschlagen: {e}")
 
+    # ---------------------------
+    # Rechenweg (unten, ausführlich)
+    # ---------------------------
     st.divider()
-    st.markdown("### Hinweis zur Praxis")
-    st.write(
-        "- Für Mehrphasenpumpen ist p_abs entlang der Strömung relevant (Saugseite / Laufradeintritt besonders kritisch).\n"
-        "- Der Rechner nutzt IF97-Sattdampfgleichungen (reines Wasser). Für Mediengemische (KSS, Glykol etc.) verschiebt sich die Sättigung."
+    st.subheader("Rechenweg & Normbezug (Sättigung / Mehrphasen)")
+
+    st.markdown(
+        """
+**Ziel:** Abschätzen, ob bei gegebenem Druck/Temperatur Wasser (oder Wasseranteil) in den **Sättigungsbereich** kommt → Risiko von Flash/Boiling/Mehrphasenbildung.
+
+### A) Physikalische Grundlage
+- In der Dampf-Flüssig-Gleichgewichts-Linie gilt:
+  - **T_sätt = f(p_abs)** oder äquivalent **p_sätt = f(T)**
+- Mehrphasenbildung (Flash) wird wahrscheinlich, wenn:
+  - **T_op > T_sätt(p_abs)** oder
+  - **p_op < p_sätt(T)**
+
+### B) Berechnung in der App (IAPWS-IF97)
+Die App nutzt die industrielle Wasserdampf-Formulierung **IAPWS-IF97** (Region 4 für Sättigungslinie):
+- **T_sätt aus p_abs:** Aus absolutem Druck wird die Sättigungstemperatur berechnet.
+- **p_sätt aus T:** Aus Temperatur wird der Sättigungsdruck berechnet.
+
+### C) Sicherheitsabstände
+- Thermische Reserve:
+  - **ΔT = T_sätt − T_op** (K)
+- Druckreserve:
+  - **Δp = p_op − p_sätt** (bar)
+
+### D) Warum das für Mehrphasenpumpen wichtig ist
+- In Mehrphasen-/Kavitations-Szenarien ist besonders kritisch:
+  - **Saugseite / Laufradeintritt** (lokales Druckminimum)
+  - lokale Druckabfälle (Eintritt, Vorrotation, Drosseln, Ventile)
+- Der Kalkulator liefert eine schnelle „Ampel“ zur Frage:
+  - **Liege ich thermodynamisch schon im Sättigungs-/Flashbereich?**
+
+**Hinweis:** Der Rechner gilt für **reines Wasser**. Für Gemische (KSS, Glykol, Salz, gelöste Gase) verschiebt sich die Sättigung.
+"""
     )
