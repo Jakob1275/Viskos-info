@@ -56,8 +56,10 @@ MEDIA = {
 # ---------------------------
 # Helpers
 # ---------------------------
-def interp(x, xs, ys):
-    """Lineare Interpolation mit Clamping am Rand."""
+def interp_clamped(x, xs, ys):
+    """Lineare Interpolation mit Clamping am Rand. xs muss aufsteigend sein."""
+    if len(xs) < 2:
+        return ys[0]
     if x <= xs[0]:
         return ys[0]
     if x >= xs[-1]:
@@ -68,6 +70,9 @@ def interp(x, xs, ys):
             x1, y1 = xs[i], ys[i]
             return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
     return ys[-1]
+
+def clamp(x, a, b):
+    return max(a, min(b, x))
 
 def motor_iec(P_kW):
     steps = [
@@ -96,112 +101,127 @@ def viscosity_factors_from_B(B, nu_cSt, nu_water_threshold=1.5):
     if B <= 1.0:
         return 1.0, 1.0, 1.0
 
+    # Cq ≈ Ch
     Cq = math.exp(-0.165 * (math.log10(B) ** 3.15))
-    Cq = min(max(Cq, 0.0), 1.0)
+    Cq = clamp(Cq, 0.0, 1.0)
     Ch = Cq
 
-    Beff = min(max(B, 1.0000001), 40.0)
+    # Ceta (clamp B auf <=40)
+    Beff = clamp(B, 1.0000001, 40.0)
     Ceta = Beff ** (-(0.0547 * (Beff ** 0.69)))
-    Ceta = min(max(Ceta, 0.0), 1.0)
+    Ceta = clamp(Ceta, 0.0, 1.0)
 
     return Cq, Ch, Ceta
 
 def viscous_to_water_equivalent(Qv, Hv, nu_cSt):
     B = compute_B(Qv, Hv, nu_cSt)
     Cq, Ch, Ceta = viscosity_factors_from_B(B, nu_cSt)
-    if Cq <= 0 or Ch <= 0:
-        raise ValueError("Cq/Ch <= 0. Prüfe Eingaben.")
-    return {
-        "B": B, "Cq": Cq, "Ch": Ch, "Ceta": Ceta,
-        "Qw": Qv / Cq,
-        "Hw": Hv / Ch
-    }
+    # Schutz
+    if Cq <= 1e-12 or Ch <= 1e-12:
+        Cq, Ch, Ceta = 1.0, 1.0, 1.0
+    return {"B": B, "Cq": Cq, "Ch": Ch, "Ceta": Ceta, "Qw": Qv / Cq, "Hw": Hv / Ch}
 
 def water_point_to_viscous(Qw, Hw, eta_w, nu_cSt, max_iter=60, tol=1e-10):
-    # Wasser-Bypass
+    # Wasser-Bypass: Kennlinie bleibt identisch
     if nu_cSt <= 1.5:
-        return Qw, Hw, max(1e-6, eta_w), 1.0, 1.0, 1.0, 1.0
+        return Qw, Hw, max(1e-6, eta_w)
 
+    # Iteration, weil B über viskose Größen definiert ist
     Qv = max(Qw, 1e-12)
     Hv = max(Hw, 1e-12)
 
     for _ in range(max_iter):
         B = compute_B(Qv, Hv, nu_cSt)
         Cq, Ch, Ceta = viscosity_factors_from_B(B, nu_cSt)
-
-        Qv_new = Cq * Qw
-        Hv_new = Ch * Hw
+        Qv_new = max(1e-12, Cq * Qw)
+        Hv_new = max(1e-12, Ch * Hw)
 
         dq = abs(Qv_new - Qv) / max(Qv, 1e-12)
         dh = abs(Hv_new - Hv) / max(Hv, 1e-12)
-
-        Qv, Hv = max(Qv_new, 1e-12), max(Hv_new, 1e-12)
+        Qv, Hv = Qv_new, Hv_new
 
         if max(dq, dh) < tol:
             break
 
     B = compute_B(Qv, Hv, nu_cSt)
-    Cq, Ch, Ceta = viscosity_factors_from_B(B, nu_cSt)
+    _, _, Ceta = viscosity_factors_from_B(B, nu_cSt)
     eta_v = max(1e-6, Ceta * eta_w)
-    return Qv, Hv, eta_v, B, Cq, Ch, Ceta
+    return Qv, Hv, eta_v
 
 # ---------------------------
-# Best-Pump-Auswahl
+# Pumpenauswahl (robust, crasht nicht)
 # ---------------------------
-def choose_best_pump(pumps, Qw_target, Hw_target):
+def choose_best_pump_robust(pumps, Qw_target, Hw_target, allow_out_of_range=True):
     """
-    Auswahlkriterium:
-      - Qw_target muss im Bereich der Pumpe liegen
-      - minimiere |H_pump(Qw_target) - Hw_target|
-      - bei Gleichstand: höhere eta_w bevorzugen
+    Robust:
+      - Wenn Qw außerhalb liegt: optional "clamp" auf Rand und Strafterm
+      - Auswahl: minimaler (|ΔH| + penalty) ; tie-breaker: höheres eta
     """
     best = None
+
     for p in pumps:
         qmin, qmax = min(p["Qw"]), max(p["Qw"])
-        if not (qmin <= Qw_target <= qmax):
+
+        in_range = (qmin <= Qw_target <= qmax)
+        if not in_range and not allow_out_of_range:
             continue
 
-        H_at = interp(Qw_target, p["Qw"], p["Hw"])
-        eta_at = interp(Qw_target, p["Qw"], p["eta"])
+        # Wenn außerhalb: clamp auf Rand und Strafterm setzen
+        Q_eval = Qw_target
+        penalty = 0.0
+        if not in_range:
+            Q_eval = clamp(Qw_target, qmin, qmax)
+            # Strafterm proportional zur relativen Überschreitung
+            span = max(qmax - qmin, 1e-9)
+            penalty = abs(Qw_target - Q_eval) / span * 10.0  # 10 m "virtuelle" Strafe
+
+        H_at = interp_clamped(Q_eval, p["Qw"], p["Hw"])
+        eta_at = interp_clamped(Q_eval, p["Qw"], p["eta"])
         errH = abs(H_at - Hw_target)
+
+        score = errH + penalty
 
         cand = {
             "id": p["id"],
-            "errH": errH,
+            "pump": p,
+            "Q_eval": Q_eval,
+            "in_range": in_range,
+            "penalty": penalty,
             "H_at": H_at,
             "eta_at": eta_at,
-            "pump": p
+            "errH": errH,
+            "score": score,
         }
 
         if best is None:
             best = cand
         else:
-            # primär nach errH, sekundär nach höherer eta
-            if cand["errH"] < best["errH"] - 1e-9:
+            if cand["score"] < best["score"] - 1e-9:
                 best = cand
-            elif abs(cand["errH"] - best["errH"]) <= 1e-9 and cand["eta_at"] > best["eta_at"]:
+            elif abs(cand["score"] - best["score"]) <= 1e-9 and cand["eta_at"] > best["eta_at"]:
                 best = cand
 
-    if best is None:
-        raise ValueError("Keine Pumpe hat den Qw-Äquivalenzpunkt im Kennlinienbereich.")
     return best
 
 # ---------------------------
 # Streamlit UI
 # ---------------------------
 st.set_page_config(page_title="Best-Pump Auswahl + viskose Kennlinie", layout="centered")
-st.title("Viskoser Arbeitspunkt → Wasseräquivalent → beste Pumpe (aus 5 Kennlinien)")
+st.title("Viskoser Arbeitspunkt → Wasseräquivalent → beste Pumpe (5 Kennlinien)")
 
 with st.sidebar:
     st.header("Anforderung im Medium (viskos)")
-    Qv_req = st.number_input("Qν (gefordert) [m³/h]", min_value=0.1, max_value=250.0, value=40.0, step=1.0)
-    Hv_req = st.number_input("Hν (gefordert) [m]", min_value=0.1, max_value=250.0, value=35.0, step=1.0)
+    Qv_req = st.number_input("Qν (gefordert) [m³/h]", min_value=0.1, max_value=300.0, value=40.0, step=1.0)
+    Hv_req = st.number_input("Hν (gefordert) [m]", min_value=0.1, max_value=300.0, value=35.0, step=1.0)
 
     st.header("Medium")
     mk = st.selectbox("Medium auswählen", list(MEDIA.keys()), index=0)
     rho_def, nu_def = MEDIA[mk]
     rho = st.number_input("ρ [kg/m³] (anpassbar)", min_value=1.0, value=float(rho_def), step=5.0)
     nu = st.number_input("ν [cSt] (anpassbar)", min_value=0.1, value=float(nu_def), step=0.5)
+
+    st.header("Auswahlverhalten")
+    allow_out = st.checkbox("Wenn Qw außerhalb liegt: trotzdem 'Best fit' wählen", value=True)
 
     st.header("Motorreserve")
     reserve_pct = st.slider("Reserve [%]", 0, 30, 15)
@@ -221,19 +241,30 @@ c2.metric("Hw [m]", f"{Hw_eq:.2f}")
 c3.metric("Cq / Ch", f"{Cq_req:.3f} / {Ch_req:.3f}")
 c4.metric("B [-]", f"{B_req:.2f}")
 
-# 2) Beste Pumpe auswählen
-best = choose_best_pump(PUMPS, Qw_target=Qw_eq, Hw_target=Hw_eq)
-p = best["pump"]
+# 2) Beste Pumpe auswählen (robust)
+best = choose_best_pump_robust(PUMPS, Qw_target=Qw_eq, Hw_target=Hw_eq, allow_out_of_range=allow_out)
+
+if best is None:
+    st.error("Keine Pumpe konnte bewertet werden. (Das sollte praktisch nicht passieren.)")
+    st.stop()
 
 st.divider()
 st.subheader("2) Beste Pumpe (Wasserkennlinie)")
 c1, c2, c3 = st.columns(3)
 c1.metric("Ausgewählte Pumpe", best["id"])
-c2.metric("H_pump(Qw) [m]", f"{best['H_at']:.2f}")
+c2.metric("H_pump(Q) [m]", f"{best['H_at']:.2f}")
 c3.metric("|ΔH| [m]", f"{best['errH']:.2f}")
-st.write(f"ηw(Qw) ≈ **{best['eta_at']:.3f}**")
+st.write(f"ηw(Q) ≈ **{best['eta_at']:.3f}**")
 
-# 3) Motorleistung im viskosen Arbeitspunkt (η viskos = Ceta * ηw am Qw)
+if not best["in_range"]:
+    st.warning(
+        f"Qw={Qw_eq:.2f} liegt außerhalb der Kennlinie dieser Pumpe "
+        f"(Range: {min(best['pump']['Qw'])}…{max(best['pump']['Qw'])}). "
+        "Es wurde am Rand ausgewertet (clamp) und eine Strafbewertung genutzt."
+    )
+
+# 3) Motorleistung im viskosen Arbeitspunkt (ην = Ceta * ηw am Wasseräquivalentpunkt)
+# Für ηw nehmen wir konsistent η an Q_eval (clamped), weil sonst die Pumpenkennlinie nicht definiert wäre.
 eta_v_req = max(1e-6, Ceta_req * best["eta_at"])
 P_hyd_W = float(rho) * G * (float(Qv_req) / 3600.0) * float(Hv_req)
 P_vis_kW = (P_hyd_W / eta_v_req) / 1000.0
@@ -247,33 +278,38 @@ c2.metric("Pν [kW]", f"{P_vis_kW:.2f}")
 c3.metric(f"Motor +{reserve_pct}% [kW]", f"{P_motor_kW:.2f}")
 
 # 4) Viskose Kennlinie der ausgewählten Pumpe erzeugen
+p = best["pump"]
 Qv_curve, Hv_curve, eta_v_curve = [], [], []
 for Qw_i, Hw_i, eta_w_i in zip(p["Qw"], p["Hw"], p["eta"]):
-    Qv_i, Hv_i, eta_v_i, *_ = water_point_to_viscous(Qw_i, Hw_i, eta_w_i, nu_cSt=nu)
+    Qv_i, Hv_i, eta_v_i = water_point_to_viscous(Qw_i, Hw_i, eta_w_i, nu_cSt=nu)
     Qv_curve.append(Qv_i)
     Hv_curve.append(Hv_i)
     eta_v_curve.append(eta_v_i)
 
-# Interpolierte Punkte auf ausgewählter Kennlinie (Wasser/viskos) für Markierungen
-H_w_curve_at_Qw = interp(Qw_eq, p["Qw"], p["Hw"])
-eta_w_curve_at_Qw = interp(Qw_eq, p["Qw"], p["eta"])
-H_v_curve_at_Qv = interp(Qv_req, Qv_curve, Hv_curve)
-eta_v_curve_at_Qv = interp(Qv_req, Qv_curve, eta_v_curve)
+# Markierungen: Wasserkennlinie am Wasseräquivalentpunkt (falls außerhalb: clamp)
+Qw_plot = clamp(Qw_eq, min(p["Qw"]), max(p["Qw"]))
+H_w_curve_at_Qw = interp_clamped(Qw_plot, p["Qw"], p["Hw"])
+eta_w_curve_at_Qw = interp_clamped(Qw_plot, p["Qw"], p["eta"])
+
+# Markierungen: viskose Kennlinie bei Qν (clamp)
+Qv_plot = clamp(Qv_req, min(Qv_curve), max(Qv_curve))
+H_v_curve_at_Qv = interp_clamped(Qv_plot, Qv_curve, Hv_curve)
+eta_v_curve_at_Qv = interp_clamped(Qv_plot, Qv_curve, eta_v_curve)
 
 st.divider()
-st.subheader("Kennlinien-Visualisierung (alle Pumpen + ausgewählte Pumpe hervorgehoben)")
+st.subheader("Kennlinien-Visualisierung")
 
-# Plot Q-H
+# Plot 1: Q-H (alle Wasserkennlinien + viskos der Auswahl)
 fig1, ax1 = plt.subplots()
 for pp in PUMPS:
     ax1.plot(pp["Qw"], pp["Hw"], marker="o", linestyle="-", label=pp["id"])
+
+ax1.plot(Qv_curve, Hv_curve, marker="o", linestyle="--", label=f"{best['id']} (viskos)")
+
 ax1.scatter([Qw_eq], [Hw_eq], marker="^", s=70, label="Wasseräquivalent (Qw,Hw)")
 ax1.scatter([Qv_req], [Hv_req], marker="x", s=80, label="Arbeitspunkt viskos (Qν,Hν)")
-ax1.scatter([Qw_eq], [H_w_curve_at_Qw], marker="s", s=55, label="H_w auf ausgewählter Kennlinie")
-ax1.scatter([Qv_req], [H_v_curve_at_Qv], marker="s", s=55, label="H_ν auf viskoser Kennlinie")
-
-# Zusätzlich: viskose Kennlinie der ausgewählten Pumpe
-ax1.plot(Qv_curve, Hv_curve, marker="o", linestyle="--", label=f"{best['id']} (viskos)")
+ax1.scatter([Qw_plot], [H_w_curve_at_Qw], marker="s", s=55, label="H_w auf Auswahlkennlinie")
+ax1.scatter([Qv_plot], [H_v_curve_at_Qv], marker="s", s=55, label="H_ν auf viskoser Auswahlkennlinie")
 
 ax1.set_xlabel("Q [m³/h]")
 ax1.set_ylabel("H [m]")
@@ -282,13 +318,16 @@ ax1.grid(True)
 ax1.legend()
 st.pyplot(fig1, clear_figure=True)
 
-# Plot Q-eta
+# Plot 2: Q-η (alle Wasserkennlinien + viskos der Auswahl)
 fig2, ax2 = plt.subplots()
 for pp in PUMPS:
     ax2.plot(pp["Qw"], pp["eta"], marker="o", linestyle="-", label=pp["id"])
-ax2.scatter([Qw_eq], [eta_w_curve_at_Qw], marker="x", s=80, label="ηw bei Qw (Auswahl)")
-ax2.scatter([Qv_req], [eta_v_req], marker="^", s=70, label="ην am Arbeitspunkt")
+
 ax2.plot(Qv_curve, eta_v_curve, marker="o", linestyle="--", label=f"{best['id']} (viskos η)")
+
+ax2.scatter([Qw_plot], [eta_w_curve_at_Qw], marker="x", s=80, label="ηw auf Auswahlkennlinie")
+ax2.scatter([Qv_req], [eta_v_req], marker="^", s=70, label="ην am Arbeitspunkt")
+ax2.scatter([Qv_plot], [eta_v_curve_at_Qv], marker="s", s=55, label="ην auf viskoser Auswahlkennlinie")
 
 ax2.set_xlabel("Q [m³/h]")
 ax2.set_ylabel("η [-]")
@@ -303,7 +342,7 @@ with st.expander("Kurz-Rechengang"):
 - Eingabe (viskos): **Qν={Qv_req:.2f} m³/h**, **Hν={Hv_req:.2f} m**, **ν={nu:.2f} cSt**, **ρ={rho:.1f} kg/m³**
 - Umrechnung: B={B_req:.2f} → Cq={Cq_req:.3f}, Ch={Ch_req:.3f}, Cη={Ceta_req:.3f}
 - Wasseräquivalent: **Qw=Qν/Cq={Qw_eq:.2f}**, **Hw=Hν/Ch={Hw_eq:.2f}**
-- Pumpenauswahl: minimiere |H_pump(Qw) − Hw| → **{best['id']}**, |ΔH|={best['errH']:.2f} m
-- Motor: ην=Cη·ηw(Qw)={eta_v_req:.3f} → Pν=ρgQνHν/ην={P_vis_kW:.2f} kW → Motor (Reserve)={P_motor_kW:.2f} kW
+- Pumpenauswahl: minimiere |H_pump(Q) − Hw| (mit Range-Strafe falls außerhalb) → **{best['id']}**
+- Motor: ην=Cη·ηw≈{eta_v_req:.3f} → Pν≈{P_vis_kW:.2f} kW → Motor (Reserve)≈{P_motor_kW:.2f} kW
 """
     )
