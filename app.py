@@ -319,82 +319,82 @@ if st.session_state.page == "pump":
     st.divider()
     st.subheader("Rechenweg & Normbezug (Pumpen/viskos)")
 
-st.markdown(r"""
-**Ziel:** Aus einem geforderten Betriebspunkt im viskosen Medium $(Q_\nu, H_\nu)$ wird auf Basis einer **Wasser-Referenzkennlinie** eine geeignete Pumpe ausgewählt und der Betriebspunkt auf das viskose Medium zurückgeführt (inkl. Wirkungsgrad- und Leistungsabschätzung).
+    st.markdown(r"""
+    **Ziel:** Aus einem geforderten Betriebspunkt im viskosen Medium $(Q_\nu, H_\nu)$ wird auf Basis einer **Wasser-Referenzkennlinie** eine geeignete Pumpe ausgewählt und der Betriebspunkt auf das viskose Medium zurückgeführt (inkl. Wirkungsgrad- und Leistungsabschätzung).
 
----
+    ---
 
-### A) Referenzbasis und Gültigkeitsrahmen
-- **Herstellerkennlinien** werden in der Regel für **Wasser** ermittelt und angegeben. Normative Prüf- und Abnahmebedingungen für Kreiselpumpen beziehen sich typischerweise auf Wasser bzw. wasserähnliche Prüfmedien (z. B. DIN EN ISO 9906 als Prüf-/Abnahmereferenz).
-- **Folgerung:** Viskositätskorrekturen sind grundsätzlich eine **Umrechnung von der Wasserkennlinie** auf das reale (viskose) Fördermedium – nicht umgekehrt „neue“ Kennlinienmessung.
+    ### A) Referenzbasis und Gültigkeitsrahmen
+    - **Herstellerkennlinien** werden in der Regel für **Wasser** ermittelt und angegeben. Normative Prüf- und Abnahmebedingungen für Kreiselpumpen beziehen sich typischerweise auf Wasser bzw. wasserähnliche Prüfmedien (z. B. DIN EN ISO 9906 als Prüf-/Abnahmereferenz).
+    - **Folgerung:** Viskositätskorrekturen sind grundsätzlich eine **Umrechnung von der Wasserkennlinie** auf das reale (viskose) Fördermedium – nicht umgekehrt „neue“ Kennlinienmessung.
 
----
+    ---
 
-### B) Schritt 1 — Umrechnung viskos $\rightarrow$ Wasseräquivalent
-1. **Eingaben** (Betriebspunkt im Fördermedium):  
+    ### B) Schritt 1 — Umrechnung viskos $\rightarrow$ Wasseräquivalent
+    1. **Eingaben** (Betriebspunkt im Fördermedium):  
 
-   $$Q_\nu\;[\mathrm{m^3/h}],\quad H_\nu\;[\mathrm{m}],\quad \nu\;[\mathrm{cSt}],\quad \rho\;[\mathrm{kg/m^3}]$$
+       $$Q_\nu\;[\mathrm{m^3/h}],\quad H_\nu\;[\mathrm{m}],\quad \nu\;[\mathrm{cSt}],\quad \rho\;[\mathrm{kg/m^3}]$$
 
-2. **Kennzahl $B$** (empirische Kennzahl der Viskositätskorrektur; in dieser App wie implementiert):  
+    2. **Kennzahl $B$** (empirische Kennzahl der Viskositätskorrektur; in dieser App wie implementiert):  
 
-   $$B = 280 \cdot \frac{\nu^{0.5}}{Q_\nu^{0.25}\cdot H_\nu^{0.125}}$$
+       $$B = 280 \cdot \frac{\nu^{0.5}}{Q_\nu^{0.25}\cdot H_\nu^{0.125}}$$
 
-3. **Korrekturfaktoren** aus $B$:  
+    3. **Korrekturfaktoren** aus $B$:  
 
-   $$C_Q,\; C_H,\; C_\eta$$
+       $$C_Q,\; C_H,\; C_\eta$$
 
-   - Für „wasserähnliche“ Medien wird in der Praxis häufig **keine Korrektur** angesetzt. In dieser App gilt daher als Schutzregel:
+       - Für „wasserähnliche“ Medien wird in der Praxis häufig **keine Korrektur** angesetzt. In dieser App gilt daher als Schutzregel:
 
-   $$\nu \le 1.5\;\mathrm{cSt}\;\Rightarrow\; C_Q=C_H=C_\eta = 1$$
+       $$\nu \le 1.5\;\mathrm{cSt}\;\Rightarrow\; C_Q=C_H=C_\eta = 1$$
 
-4. **Wasseräquivalentpunkt** (Rückrechnung auf Wasser):  
+    4. **Wasseräquivalentpunkt** (Rückrechnung auf Wasser):  
 
-   $$Q_w = \frac{Q_\nu}{C_Q},\qquad H_w = \frac{H_\nu}{C_H}$$
+       $$Q_w = \frac{Q_\nu}{C_Q},\qquad H_w = \frac{H_\nu}{C_H}$$
 
-**Interpretation:** $(Q_w, H_w)$ ist der **vergleichbare Punkt** auf der Wasserkennlinie, der zur Auswahl (und Plausibilisierung) herangezogen wird.
+    **Interpretation:** $(Q_w, H_w)$ ist der **vergleichbare Punkt** auf der Wasserkennlinie, der zur Auswahl (und Plausibilisierung) herangezogen wird.
 
----
+    ---
 
-### C) Schritt 2 — Pumpenauswahl über Wasserkennlinien
-- Für jede Pumpenkennlinie wird die Förderhöhe am Wasseräquivalentpunkt bestimmt (Interpolation):
+    ### C) Schritt 2 — Pumpenauswahl über Wasserkennlinien
+    - Für jede Pumpenkennlinie wird die Förderhöhe am Wasseräquivalentpunkt bestimmt (Interpolation):
 
-  $$H_{\mathrm{pump}}(Q_w)$$
+      $$H_{\mathrm{pump}}(Q_w)$$
 
-- Abweichung:
+    - Abweichung:
 
-  $$\Delta H = \left|H_{\mathrm{pump}}(Q_w) - H_w\right|$$
+      $$\Delta H = \left|H_{\mathrm{pump}}(Q_w) - H_w\right|$$
 
-- **Auswahlregel (App):** „beste“ Pumpe = kleinste $\Delta H$; bei Gleichstand wird die Pumpe mit höherem $\eta_w(Q_w)$ bevorzugt.
-- Liegt $Q_w$ außerhalb des Kennlinienbereichs, kann optional ein **Best-Fit am Rand** erfolgen (Clamp + Strafterm), um eine robuste Auswahl für Demonstrationszwecke zu ermöglichen. Für reale Auslegung sollte in diesem Fall eine **passende Kennlinie/Trim/Drehzahl** oder eine andere Baugröße herangezogen werden.
+    - **Auswahlregel (App):** „beste“ Pumpe = kleinste $\Delta H$; bei Gleichstand wird die Pumpe mit höherem $\eta_w(Q_w)$ bevorzugt.
+    - Liegt $Q_w$ außerhalb des Kennlinienbereichs, kann optional ein **Best-Fit am Rand** erfolgen (Clamp + Strafterm), um eine robuste Auswahl für Demonstrationszwecke zu ermöglichen. Für reale Auslegung sollte in diesem Fall eine **passende Kennlinie/Trim/Drehzahl** oder eine andere Baugröße herangezogen werden.
 
----
+    ---
 
-### D) Schritt 3 — Wirkungsgrad- und Leistungsabschätzung im viskosen Medium
-1. Wasserwirkungsgrad am Auswahlpunkt: $\eta_w(Q_w)$
+    ### D) Schritt 3 — Wirkungsgrad- und Leistungsabschätzung im viskosen Medium
+    1. Wasserwirkungsgrad am Auswahlpunkt: $\eta_w(Q_w)$
 
-2. Viskoser Wirkungsgrad (Korrektur):  
+    2. Viskoser Wirkungsgrad (Korrektur):  
 
-   $$\eta_\nu = C_\eta \cdot \eta_w(Q_w)$$
+       $$\eta_\nu = C_\eta \cdot \eta_w(Q_w)$$
 
-3. Hydraulische Leistung (mit $Q_\nu$ in $\mathrm{m^3/h}$):  
+    3. Hydraulische Leistung (mit $Q_\nu$ in $\mathrm{m^3/h}$):  
 
-   $$P_{\mathrm{hyd}} = \rho\, g \cdot \left(\frac{Q_\nu}{3600}\right)\cdot H_\nu$$
+       $$P_{\mathrm{hyd}} = \rho\, g \cdot \left(\frac{Q_\nu}{3600}\right)\cdot H_\nu$$
 
-4. Wellenleistung (vereinfachte Abschätzung):  
+    4. Wellenleistung (vereinfachte Abschätzung):  
 
-   $$P_\nu = \frac{P_{\mathrm{hyd}}}{\eta_\nu}$$
+       $$P_\nu = \frac{P_{\mathrm{hyd}}}{\eta_\nu}$$
 
-5. Motorauswahl (Reserve + nächstgrößere IEC-Stufe):  
+    5. Motorauswahl (Reserve + nächstgrößere IEC-Stufe):  
 
-   $$P_{\mathrm{Motor}} = P_\nu \cdot \left(1+\mathrm{Reserve}\right)$$
+       $$P_{\mathrm{Motor}} = P_\nu \cdot \left(1+\mathrm{Reserve}\right)$$
 
----
+    ---
 
-### E) Norm-/Standardbezug und Grenzen
-- **Wasser-Referenz und Prüfbezug:** Pumpenkennlinien/Abnahmemessungen werden normativ üblicherweise auf Wasser bzw. wasserähnliche Prüfbedingungen referenziert (z. B. DIN EN ISO 9906).  
-- **Viskositätskorrekturen:** Vorgehensweisen zur Korrektur von Q-H- und $\eta$-Kennlinien für viskose (typisch Newtonsche) Flüssigkeiten sind in einschlägigen Leitfäden/Standards beschrieben (z. B. ISO/TR 17766 und/oder Hydraulic Institute Methoden).  
-- **Gültigkeit:** Die Korrektur ist eine **Näherung**; Abweichungen sind zu erwarten bei stark nicht-newtonschen Medien, Gasanteilen/Mehrphasenströmung, sehr kleinen/ sehr großen spezifischen Drehzahlen, oder wenn der Hersteller bereits **viskose Kennlinien** bereitstellt (dann nicht doppelt korrigieren).
-""")
+    ### E) Norm-/Standardbezug und Grenzen
+    - **Wasser-Referenz und Prüfbezug:** Pumpenkennlinien/Abnahmemessungen werden normativ üblicherweise auf Wasser bzw. wasserähnliche Prüfbedingungen referenziert (z. B. DIN EN ISO 9906).  
+    - **Viskositätskorrekturen:** Vorgehensweisen zur Korrektur von Q-H- und $\eta$-Kennlinien für viskose (typisch Newtonsche) Flüssigkeiten sind in einschlägigen Leitfäden/Standards beschrieben (z. B. ISO/TR 17766 und/oder Hydraulic Institute Methoden).  
+    - **Gültigkeit:** Die Korrektur ist eine **Näherung**; Abweichungen sind zu erwarten bei stark nicht-newtonschen Medien, Gasanteilen/Mehrphasenströmung, sehr kleinen/ sehr großen spezifischen Drehzahlen, oder wenn der Hersteller bereits **viskose Kennlinien** bereitstellt (dann nicht doppelt korrigieren).
+    """)
 
 # =========================================================
 # PAGE 2: SÄTTIGUNG
