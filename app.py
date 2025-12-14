@@ -183,6 +183,47 @@ def sat_pressure_from_temperature(t_c: float) -> float:
     w = IAPWS97(T=t_c + 273.15, x=0)
     return w.P * 10.0  # MPa -> bar
 
+def saturation_curve_pT(T_min=0.0, T_max=350.0, n=200):
+    """Sättigungslinie Wasser: p_sätt(T) als Kurve (IF97). Rückgabe: T_list [°C], p_list [bar abs]."""
+    Ts = [T_min + (T_max - T_min) * i / (n - 1) for i in range(n)]
+    ps = []
+    for T in Ts:
+        try:
+            ps.append(sat_pressure_from_temperature(T))
+        except Exception:
+            ps.append(float("nan"))
+    return Ts, ps
+
+
+def gas_derating_factor(gvf, k=1.4, exp=0.85):
+    """
+    Einfaches Derating für Förderhöhe (Demo):
+    H_gas = H * (1 - k * gvf^exp), begrenzt auf min 0.2.
+    gvf als Anteil 0..1.
+    """
+    gvf = clamp(gvf, 0.0, 0.6)
+    f = 1.0 - k * (gvf ** exp)
+    return clamp(f, 0.2, 1.0)
+
+
+def eta_derating_factor(gvf, k=2.0, exp=0.9):
+    """
+    Einfaches Derating für Wirkungsgrad (Demo):
+    η_gas = η * (1 - k * gvf^exp), begrenzt auf min 0.1.
+    """
+    gvf = clamp(gvf, 0.0, 0.6)
+    f = 1.0 - k * (gvf ** exp)
+    return clamp(f, 0.1, 1.0)
+
+
+def apply_gas_derating_curve(Q, H, eta, gvf):
+    """Wendet Gas-Derating auf Kennlinienpunkte an (gvf 0..1)."""
+    fH = gas_derating_factor(gvf)
+    feta = eta_derating_factor(gvf)
+    Hg = [h * fH for h in H]
+    etag = [max(1e-6, e * feta) for e in eta]
+    return Q, Hg, etag
+
 # ---------------------------
 # App Layout + Navigation per Buttons
 # ---------------------------
@@ -407,12 +448,27 @@ else:
         st.subheader("Eingaben (Sättigung)")
         mode = st.radio("Berechnung", ["T_sätt aus p_abs", "p_sätt aus T"], index=0)
 
+    # -------------------------------------------------
+    # 1) Berechnungsteil (wie gehabt)
+    # -------------------------------------------------
+    t_sat = None
+    p_sat = None
+
     if mode == "T_sätt aus p_abs":
         col1, col2 = st.columns(2)
         with col1:
-            p_bar_abs = st.number_input("Absolutdruck p_abs [bar]", min_value=0.01, max_value=1000.0, value=1.013, step=0.1)
-            t_op = st.number_input("Betriebstemperatur T_op [°C]", min_value=-20.0, max_value=800.0, value=20.0, step=1.0)
-            margin = st.number_input("Sicherheitsabstand ΔT [K]", min_value=0.0, max_value=50.0, value=5.0, step=0.5)
+            p_bar_abs = st.number_input(
+                "Absolutdruck p_abs [bar]",
+                min_value=0.01, max_value=1000.0, value=1.013, step=0.1
+            )
+            t_op = st.number_input(
+                "Betriebstemperatur T_op [°C]",
+                min_value=-20.0, max_value=800.0, value=20.0, step=1.0
+            )
+            margin = st.number_input(
+                "Sicherheitsabstand ΔT [K]",
+                min_value=0.0, max_value=50.0, value=5.0, step=0.5
+            )
 
         try:
             t_sat = sat_temperature_from_pressure(float(p_bar_abs))
@@ -433,9 +489,18 @@ else:
     else:
         col1, col2 = st.columns(2)
         with col1:
-            t_c = st.number_input("Temperatur T [°C]", min_value=-20.0, max_value=800.0, value=100.0, step=1.0)
-            p_op = st.number_input("Betriebsdruck p_abs [bar]", min_value=0.01, max_value=1000.0, value=1.013, step=0.1)
-            margin_p = st.number_input("Sicherheitsabstand Δp [bar]", min_value=0.0, max_value=50.0, value=0.2, step=0.05)
+            t_c = st.number_input(
+                "Temperatur T [°C]",
+                min_value=-20.0, max_value=800.0, value=100.0, step=1.0
+            )
+            p_op = st.number_input(
+                "Betriebsdruck p_abs [bar]",
+                min_value=0.01, max_value=1000.0, value=1.013, step=0.1
+            )
+            margin_p = st.number_input(
+                "Sicherheitsabstand Δp [bar]",
+                min_value=0.0, max_value=50.0, value=0.2, step=0.05
+            )
 
         try:
             p_sat = sat_pressure_from_temperature(float(t_c))
@@ -453,6 +518,106 @@ else:
         except Exception as e:
             st.error(f"IF97-Berechnung fehlgeschlagen: {e}")
 
+    # -------------------------------------------------
+    # 2) Visualisierungen
+    # -------------------------------------------------
+    st.divider()
+    st.subheader("Kennlinien-Visualisierung (Sättigung & Gasanteil)")
+
+    # 2A) Wasser-Sättigungslinie p(T)
+    with st.expander("Wasser-Sättigungslinie p_sätt(T) (IF97)", expanded=True):
+        cA, cB = st.columns(2)
+        with cA:
+            T_min = st.slider("T-Min [°C]", 0, 120, 0)
+            T_max = st.slider("T-Max [°C]", 120, 400, 250)
+        with cB:
+            show_point = st.checkbox("Betriebspunkt markieren", value=True)
+            n_pts = st.slider("Auflösung", 80, 400, 220, step=20)
+
+        Ts, ps = saturation_curve_pT(T_min=float(T_min), T_max=float(T_max), n=int(n_pts))
+
+        fig, ax = plt.subplots()
+        ax.plot(Ts, ps, linestyle="-", label="p_sätt(T) Wasser")
+
+        if show_point:
+            # Marker je nach Modus
+            if mode == "T_sätt aus p_abs":
+                # Betriebspunkt (T_op, p_abs)
+                ax.scatter([float(t_op)], [float(p_bar_abs)], marker="x", s=80, label="Betriebspunkt (T_op, p_abs)")
+                # Sättigungspunkt zu p_abs: (T_sätt, p_abs)
+                if t_sat is not None:
+                    ax.scatter([float(t_sat)], [float(p_bar_abs)], marker="o", s=60, label="(T_sätt, p_abs)")
+            else:
+                # Betriebspunkt (T, p_op)
+                ax.scatter([float(t_c)], [float(p_op)], marker="x", s=80, label="Betriebspunkt (T, p_op)")
+                # Sättigungspunkt zu T: (T, p_sätt)
+                if p_sat is not None:
+                    ax.scatter([float(t_c)], [float(p_sat)], marker="o", s=60, label="(T, p_sätt)")
+
+        ax.set_xlabel("Temperatur T [°C]")
+        ax.set_ylabel("Sättigungsdruck p_sätt [bar abs]")
+        ax.set_title("Wasser-Sättigungslinie (p–T)")
+        ax.grid(True)
+        ax.legend()
+        st.pyplot(fig, clear_figure=True)
+
+    # 2B) Pumpenkennlinienfamilie bei Gasanteil (GVF) – Demo/Derating
+    with st.expander("Pumpenkennlinien bei Gasanteil (GVF) – Visualisierung", expanded=False):
+        st.caption(
+            "Hinweis: Gasanteile verändern Pumpenkennlinien stark pumpen- und eintrittsabhängig. "
+            "Die Darstellung hier ist ein parametrisches Derating zur Visualisierung/Sensitivität."
+        )
+
+        pump_id = st.selectbox("Pumpe auswählen", [pp["id"] for pp in PUMPS], index=0)
+        pump = next(pp for pp in PUMPS if pp["id"] == pump_id)
+
+        gvf_list_pct = st.multiselect(
+            "GVF-Stufen [%]",
+            options=[0, 2, 5, 10, 15, 20, 30, 40, 50],
+            default=[0, 10, 20, 30]
+        )
+        if 0 not in gvf_list_pct:
+            gvf_list_pct = [0] + gvf_list_pct
+        gvf_list_pct = sorted(set(gvf_list_pct))
+
+        Q_base = pump["Qw"]
+        H_base = pump["Hw"]
+        eta_base = pump["eta"]
+
+        # Q-H Familien
+        figH, axH = plt.subplots()
+        axH.plot(Q_base, H_base, marker="o", linestyle="-", label="GVF 0% (Basis)")
+        for g in gvf_list_pct:
+            if g == 0:
+                continue
+            gvf = g / 100.0
+            _, Hg, _ = apply_gas_derating_curve(Q_base, H_base, eta_base, gvf)
+            axH.plot(Q_base, Hg, marker="o", linestyle="--", label=f"GVF {g}%")
+
+        axH.set_xlabel("Q [m³/h]")
+        axH.set_ylabel("H [m]")
+        axH.set_title("Q-H Kennlinienfamilie bei Gasanteil (GVF)")
+        axH.grid(True)
+        axH.legend()
+        st.pyplot(figH, clear_figure=True)
+
+        # Q-η Familien
+        figE, axE = plt.subplots()
+        axE.plot(Q_base, eta_base, marker="o", linestyle="-", label="GVF 0% (Basis)")
+        for g in gvf_list_pct:
+            if g == 0:
+                continue
+            gvf = g / 100.0
+            _, _, etag = apply_gas_derating_curve(Q_base, H_base, eta_base, gvf)
+            axE.plot(Q_base, etag, marker="o", linestyle="--", label=f"GVF {g}%")
+
+        axE.set_xlabel("Q [m³/h]")
+        axE.set_ylabel("η [-]")
+        axE.set_title("Q-η Kennlinienfamilie bei Gasanteil (GVF)")
+        axE.grid(True)
+        axE.legend()
+        st.pyplot(figE, clear_figure=True)
+
     # ---------------------------
     # Rechenweg (unten, ausführlich)
     # ---------------------------
@@ -466,11 +631,11 @@ else:
 
 ### A) Physikalische Grundlage
 - Für das thermodynamische Gleichgewicht zwischen flüssiger und gasförmiger Phase gilt die **Sättigungslinie**:
-  
+
   $$T_\mathrm{sätt} = f(p_\mathrm{abs}) \qquad \text{bzw.} \qquad p_\mathrm{sätt} = f(T)$$
 
 - Mehrphasenbildung (Flash/Sieden) wird wahrscheinlich, wenn:
-  
+
   $$T_\mathrm{op} > T_\mathrm{sätt}(p_\mathrm{abs})$$
   oder
   $$p_\mathrm{op} < p_\mathrm{sätt}(T)$$
@@ -480,12 +645,8 @@ else:
 ### B) Berechnung in der App (IAPWS-IF97)
 Die App nutzt die international etablierte **IAPWS-IF97-Formulierung** für Wasser und Wasserdampf (Region 4: Sättigungslinie):
 
-- **$T_\mathrm{sätt}$ aus $p_\mathrm{abs}$:**  
-  Berechnung der Sättigungstemperatur bei gegebenem absolutem Druck
-- **$p_\mathrm{sätt}$ aus $T$:**  
-  Berechnung des Sättigungsdrucks bei gegebener Temperatur
-
-Die Berechnung erfolgt auf Basis thermodynamischer Stoffwertgleichungen und ist für reines Wasser im technisch relevanten Bereich validiert.
+- **$T_\mathrm{sätt}$ aus $p_\mathrm{abs}$:** Berechnung der Sättigungstemperatur bei gegebenem absolutem Druck
+- **$p_\mathrm{sätt}$ aus $T$:** Berechnung des Sättigungsdrucks bei gegebener Temperatur
 
 ---
 
@@ -493,30 +654,17 @@ Die Berechnung erfolgt auf Basis thermodynamischer Stoffwertgleichungen und ist 
 Zur Bewertung der Betriebsreserve werden einfache Abstandskennzahlen verwendet:
 
 - **Thermische Reserve:**
-  
   $$\Delta T = T_\mathrm{sätt} - T_\mathrm{op} \quad [\mathrm{K}]$$
 
 - **Druckreserve:**
-  
   $$\Delta p = p_\mathrm{op} - p_\mathrm{sätt} \quad [\mathrm{bar}]$$
-
-Kleine oder negative Reserven weisen auf ein erhöhtes Risiko für Mehrphasenbildung hin.
 
 ---
 
 ### D) Bedeutung für die Auslegung von Mehrphasenpumpen
-- Besonders kritisch sind Bereiche mit **lokalem Druckminimum**, insbesondere:
-  - Saugseite der Pumpe
-  - Laufradeintritt
-  - Einlaufkanäle, Drosseln, Ventile
-- Bereits geringe Druckverluste oder Temperaturerhöhungen können dazu führen, dass der lokale Zustand die Sättigung überschreitet.
-- Der Kalkulator liefert daher eine **qualitative Ampelbewertung**:
-  - *ausreichende Reserve*  
-  - *kritischer Bereich*  
-  - *Flash/Mehrphasenbildung wahrscheinlich*
+- Besonders kritisch sind Bereiche mit **lokalem Druckminimum**, insbesondere Saugseite / Laufradeintritt.
+- Die Sättigungslinie liefert die thermodynamische Grenze; zusätzliche Druckverluste können lokal Mehrphasenbildung auslösen.
+- Die Gasanteils-Kennlinienfamilie ist eine Visualisierung der typischen „Derating“-Tendenz bei GVF (Näherung).
 
----
-
-**Hinweis:**  
-Der Rechner gilt für **reines Wasser**. Bei Gemischen (z. B. KSS, Glykol-Wasser-Gemische, salzhaltige Medien, gelöste Gase) verschiebt sich die Sättigungslinie; die Ergebnisse sind dann nur eingeschränkt übertragbar.
+**Hinweis:** Der Rechner gilt für **reines Wasser**. Bei Gemischen verschiebt sich die Sättigungslinie; außerdem sind Gasanteilseffekte pumpenspezifisch und sollten für Auslegung über Herstellerdaten validiert werden.
 """)
