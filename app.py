@@ -459,35 +459,64 @@ else:
     st.divider()
     st.subheader("Rechenweg & Normbezug (Sättigung / Mehrphasen)")
 
-    st.markdown(
-        """
-**Ziel:** Abschätzen, ob bei gegebenem Druck/Temperatur Wasser (oder Wasseranteil) in den **Sättigungsbereich** kommt → Risiko von Flash/Boiling/Mehrphasenbildung.
+    st.markdown(r"""
+**Ziel:** Abschätzen, ob bei gegebenem Druck und/oder Temperatur Wasser (oder ein Wasseranteil) in den **Sättigungsbereich** gelangt und damit ein Risiko für **Flash, Sieden oder Mehrphasenbildung** besteht.
+
+---
 
 ### A) Physikalische Grundlage
-- In der Dampf-Flüssig-Gleichgewichts-Linie gilt:
-  - **T_sätt = f(p_abs)** oder äquivalent **p_sätt = f(T)**
-- Mehrphasenbildung (Flash) wird wahrscheinlich, wenn:
-  - **T_op > T_sätt(p_abs)** oder
-  - **p_op < p_sätt(T)**
+- Für das thermodynamische Gleichgewicht zwischen flüssiger und gasförmiger Phase gilt die **Sättigungslinie**:
+  
+  $$T_\mathrm{sätt} = f(p_\mathrm{abs}) \qquad \text{bzw.} \qquad p_\mathrm{sätt} = f(T)$$
+
+- Mehrphasenbildung (Flash/Sieden) wird wahrscheinlich, wenn:
+  
+  $$T_\mathrm{op} > T_\mathrm{sätt}(p_\mathrm{abs})$$
+  oder
+  $$p_\mathrm{op} < p_\mathrm{sätt}(T)$$
+
+---
 
 ### B) Berechnung in der App (IAPWS-IF97)
-Die App nutzt die industrielle Wasserdampf-Formulierung **IAPWS-IF97** (Region 4 für Sättigungslinie):
-- **T_sätt aus p_abs:** Aus absolutem Druck wird die Sättigungstemperatur berechnet.
-- **p_sätt aus T:** Aus Temperatur wird der Sättigungsdruck berechnet.
+Die App nutzt die international etablierte **IAPWS-IF97-Formulierung** für Wasser und Wasserdampf (Region 4: Sättigungslinie):
+
+- **$T_\mathrm{sätt}$ aus $p_\mathrm{abs}$:**  
+  Berechnung der Sättigungstemperatur bei gegebenem absolutem Druck
+- **$p_\mathrm{sätt}$ aus $T$:**  
+  Berechnung des Sättigungsdrucks bei gegebener Temperatur
+
+Die Berechnung erfolgt auf Basis thermodynamischer Stoffwertgleichungen und ist für reines Wasser im technisch relevanten Bereich validiert.
+
+---
 
 ### C) Sicherheitsabstände
-- Thermische Reserve:
-  - **ΔT = T_sätt − T_op** (K)
-- Druckreserve:
-  - **Δp = p_op − p_sätt** (bar)
+Zur Bewertung der Betriebsreserve werden einfache Abstandskennzahlen verwendet:
 
-### D) Warum das für Mehrphasenpumpen wichtig ist
-- In Mehrphasen-/Kavitations-Szenarien ist besonders kritisch:
-  - **Saugseite / Laufradeintritt** (lokales Druckminimum)
-  - lokale Druckabfälle (Eintritt, Vorrotation, Drosseln, Ventile)
-- Der Kalkulator liefert eine schnelle „Ampel“ zur Frage:
-  - **Liege ich thermodynamisch schon im Sättigungs-/Flashbereich?**
+- **Thermische Reserve:**
+  
+  $$\Delta T = T_\mathrm{sätt} - T_\mathrm{op} \quad [\mathrm{K}]$$
 
-**Hinweis:** Der Rechner gilt für **reines Wasser**. Für Gemische (KSS, Glykol, Salz, gelöste Gase) verschiebt sich die Sättigung.
-"""
-    )
+- **Druckreserve:**
+  
+  $$\Delta p = p_\mathrm{op} - p_\mathrm{sätt} \quad [\mathrm{bar}]$$
+
+Kleine oder negative Reserven weisen auf ein erhöhtes Risiko für Mehrphasenbildung hin.
+
+---
+
+### D) Bedeutung für die Auslegung von Mehrphasenpumpen
+- Besonders kritisch sind Bereiche mit **lokalem Druckminimum**, insbesondere:
+  - Saugseite der Pumpe
+  - Laufradeintritt
+  - Einlaufkanäle, Drosseln, Ventile
+- Bereits geringe Druckverluste oder Temperaturerhöhungen können dazu führen, dass der lokale Zustand die Sättigung überschreitet.
+- Der Kalkulator liefert daher eine **qualitative Ampelbewertung**:
+  - *ausreichende Reserve*  
+  - *kritischer Bereich*  
+  - *Flash/Mehrphasenbildung wahrscheinlich*
+
+---
+
+**Hinweis:**  
+Der Rechner gilt für **reines Wasser**. Bei Gemischen (z. B. KSS, Glykol-Wasser-Gemische, salzhaltige Medien, gelöste Gase) verschiebt sich die Sättigungslinie; die Ergebnisse sind dann nur eingeschränkt übertragbar.
+""")
