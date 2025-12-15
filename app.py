@@ -534,63 +534,59 @@ if st.session_state.page == "pump":
     # Kennlinien generieren
     Q_vis_curve, H_vis_curve, eta_vis_curve = generate_viscous_curve(p, nu)
     
-    # Plots
-    st.divider()
-    st.markdown("### 📈 Kennlinien")
+# Plots
+st.divider()
+st.markdown("### 📈 Kennlinien")
+
+tab1, tab2 = st.tabs(["Q-H Kennlinie", "Q-η Kennlinie"])
+
+with tab1:
+    fig1, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Nur die Wasser-Kennlinie der aktuell gewählten Pumpe (p)
+    ax1.plot(p["Qw"], p["Hw"], marker="o", linestyle="-", 
+             label=f"{p['id']} (Wasser)", alpha=1.0, linewidth=2, color="blue")
     
-    tab1, tab2 = st.tabs(["Q-H Kennlinie", "Q-η Kennlinie"])
+    # Viskose Kennlinie der gewählten Pumpe
+    ax1.plot(Q_vis_curve, H_vis_curve, marker="s", linestyle="--", 
+             linewidth=2.5, color="red", label=f"{p['id']} (viskos)")
     
-    with tab1:
-        fig1, ax1 = plt.subplots(figsize=(10, 6))
-        
-        # Alle Wasserkennlinien
-        for pp in PUMPS:
-            alpha = 1.0 if pp["id"] == p["id"] else 0.3
-            ax1.plot(pp["Qw"], pp["Hw"], marker="o", linestyle="-", 
-                    label=pp["id"], alpha=alpha, linewidth=2 if pp["id"]==p["id"] else 1)
-        
-        # Viskose Kennlinie der gewählten Pumpe
-        ax1.plot(Q_vis_curve, H_vis_curve, marker="s", linestyle="--", 
-                linewidth=2.5, color="red", label=f"{p['id']} (viskos)")
-        
-        # Betriebspunkte
-        ax1.scatter([Q_water], [H_water], marker="^", s=150, color="blue", 
-                   edgecolors="black", linewidths=2, label="Betriebspunkt (Wasser)", zorder=5)
-        ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=200, color="red", 
-                   linewidths=3, label="Betriebspunkt (viskos)", zorder=5)
-        
-        ax1.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
-        ax1.set_ylabel("Förderhöhe H [m]", fontsize=12)
-        ax1.set_title("Q-H Kennlinien: Wasser vs. viskoses Medium", fontsize=14, fontweight="bold")
-        ax1.grid(True, alpha=0.3)
-        ax1.legend(loc="best", fontsize=9)
-        st.pyplot(fig1, clear_figure=True)
+    # Betriebspunkte
+    ax1.scatter([Q_water], [H_water], marker="^", s=150, color="blue", 
+                 edgecolors="black", linewidths=2, label="Betriebspunkt (Wasser)", zorder=5)
+    ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=200, color="red", 
+                 linewidths=3, label="Betriebspunkt (viskos)", zorder=5)
     
-    with tab2:
-        fig2, ax2 = plt.subplots(figsize=(10, 6))
-        
-        # Alle Wasserwirkungsgrade
-        for pp in PUMPS:
-            alpha = 1.0 if pp["id"] == p["id"] else 0.3
-            ax2.plot(pp["Qw"], pp["eta"], marker="o", linestyle="-", 
-                    label=pp["id"], alpha=alpha, linewidth=2 if pp["id"]==p["id"] else 1)
-        
-        # Viskoser Wirkungsgrad
-        ax2.plot(Q_vis_curve, eta_vis_curve, marker="s", linestyle="--", 
-                linewidth=2.5, color="red", label=f"{p['id']} (viskos)")
-        
-        # Betriebspunkte
-        ax2.scatter([Q_water], [eta_water], marker="^", s=150, color="blue", 
-                   edgecolors="black", linewidths=2, label="η (Wasser)", zorder=5)
-        ax2.scatter([Q_vis_req], [eta_vis], marker="x", s=200, color="red", 
-                   linewidths=3, label="η (viskos)", zorder=5)
-        
-        ax2.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
-        ax2.set_ylabel("Wirkungsgrad η [-]", fontsize=12)
-        ax2.set_title("Q-η Kennlinien: Wasser vs. viskoses Medium", fontsize=14, fontweight="bold")
-        ax2.grid(True, alpha=0.3)
-        ax2.legend(loc="best", fontsize=9)
-        st.pyplot(fig2, clear_figure=True)
+    ax1.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
+    ax1.set_ylabel("Förderhöhe H [m]", fontsize=12)
+    ax1.set_title("Q-H Kennlinien: Wasser vs. viskoses Medium", fontsize=14, fontweight="bold")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc="best", fontsize=9)
+    st.pyplot(fig1, clear_figure=True)
+
+with tab2:
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+
+    # Nur der Wasser-Wirkungsgrad der aktuell gewählten Pumpe (p)
+    ax2.plot(p["Qw"], p["eta"], marker="o", linestyle="-", 
+             label=f"{p['id']} (Wasser)", alpha=1.0, linewidth=2, color="blue")
+    
+    # Viskoser Wirkungsgrad der gewählten Pumpe
+    ax2.plot(Q_vis_curve, eta_vis_curve, marker="s", linestyle="--", 
+             linewidth=2.5, color="red", label=f"{p['id']} (viskos)")
+    
+    # Betriebspunkte
+    ax2.scatter([Q_water], [eta_water], marker="^", s=150, color="blue", 
+                 edgecolors="black", linewidths=2, label="η (Wasser)", zorder=5)
+    ax2.scatter([Q_vis_req], [eta_vis], marker="x", s=200, color="red", 
+                 linewidths=3, label="η (viskos)", zorder=5)
+    
+    ax2.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
+    ax2.set_ylabel("Wirkungsgrad η [-]", fontsize=12)
+    ax2.set_title("Q-η Kennlinien: Wasser vs. viskoses Medium", fontsize=14, fontweight="bold")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(loc="best", fontsize=9)
+    st.pyplot(fig2, clear_figure=True)
     
     # Rechenweg
     with st.expander("📘 Rechenweg & Theorie", expanded=False):
