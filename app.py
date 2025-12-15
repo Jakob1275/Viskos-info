@@ -425,11 +425,11 @@ def apply_gas_derating_curve(Q, H, eta, gvf):
 # Streamlit App
 # ---------------------------
 st.set_page_config(
-    page_title="Pumpenauslegung: Viskos + Mehrphasen (KORRIGIERT)",
-    layout="centered"
+    page_title="Pumpenauslegung: Viskos + Mehrphasen",
+    layout="wide"
 )
 
-st.title("🔧 Pumpenauslegung (Physikalisch Korrekt)")
+st.title("🔧 Pumpenauslegung")
 st.caption("Viskositätskorrektur nach Hydraulic Institute + Mehrphasen-Analyse")
 
 if "page" not in st.session_state:
