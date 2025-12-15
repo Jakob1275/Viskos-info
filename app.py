@@ -748,7 +748,6 @@ elif st.session_state.page == "mph":
 
         ### 3️⃣ Derating-Faktoren berechnen
         Die Derating-Faktoren $F_H$ und $F_{\eta}$ werden basierend auf dem GVF berechnet (hier mit den implementierten empirischen Formeln):
-        
         * **Förderhöhen-Faktor ($F_H$):**
             $$F_H = 1.0 - 1.4 \cdot (\text{{GVF}}^{{0.85}}) = {fH:.3f}$$
             Derating: **{(1-fH)*100:.1f} %**
