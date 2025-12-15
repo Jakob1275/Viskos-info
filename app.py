@@ -543,6 +543,14 @@ if st.session_state.page == "pump":
     p = best["pump"]
     
     st.divider()
+    st.markdown("### ⚡ Leistung & Motor")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("η_Wasser", f"{eta_water:.3f}")
+    col2.metric("η_viskos", f"{eta_vis:.3f}", delta=f"{(eta_vis-eta_water):.3f}")
+    col3.metric("P_viskos", f"{P_vis_kW:.2f} kW")
+    col4.metric(f"Motor (+{reserve_pct}%)", f"{P_motor_kW:.2f} kW")
+    
+    st.divider()
     st.markdown("### ✅ Gewählte Pumpe")
     col1, col2, col3 = st.columns(3)
     col1.metric("Pumpe", best["id"])
@@ -559,13 +567,6 @@ if st.session_state.page == "pump":
     P_hyd_W = rho * G * (Q_vis_req / 3600.0) * H_vis_req
     P_vis_kW = (P_hyd_W / max(eta_vis, 1e-6)) / 1000.0
     P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
-    
-    st.markdown("### ⚡ Leistung & Motor")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("η_Wasser", f"{eta_water:.3f}")
-    col2.metric("η_viskos", f"{eta_vis:.3f}", delta=f"{(eta_vis-eta_water):.3f}")
-    col3.metric("P_viskos", f"{P_vis_kW:.2f} kW")
-    col4.metric(f"Motor (+{reserve_pct}%)", f"{P_motor_kW:.2f} kW")
     
     # Kennlinien generieren
     Q_vis_curve, H_vis_curve, eta_vis_curve = generate_viscous_curve(p, nu)
