@@ -802,14 +802,13 @@ elif st.session_state.page == "mph":
 
         ### 3️⃣ Derating-Faktoren berechnen
         Die Derating-Faktoren $F_H$ und $F_{\eta}$ werden basierend auf dem GVF berechnet (hier nach empirischen Formeln, z.B. Samoilov-Ansatz):
-        
-        * **Förderhöhen-Faktor ($F_H$):**
-            $$F_H = 1.0 - 1.4 \cdot (\text{{GVF}}^{{0.85}}) = {fH:.3f}$$
-            Derating: **{(1-fH)*100:.1f} %**
+        **Förderhöhen-Faktor ($F_H$):**
+        $$F_H = 1.0 - 1.4 \cdot (\text{{GVF}}^{{0.85}}) = {fH:.3f}$$
+        Derating: **{(1-fH)*100:.1f} %**
 
-        * **Wirkungsgrad-Faktor ($F_{{\eta}}$):**
-            $$F_\eta = 1.0 - 2.0 \cdot (\text{{GVF}}^{{0.9}}) = {feta:.3f}$$
-            Derating: **{(1-feta)*100:.1f} %**
+        **Wirkungsgrad-Faktor ($F_{{\eta}}$):**
+        $$F_\eta = 1.0 - 2.0 \cdot (\text{{GVF}}^{{0.9}}) = {feta:.3f}$$
+        Derating: **{(1-feta)*100:.1f} %**
         
         ### 4️⃣ Berechneter Betriebspunkt (mit Gas)
         Der Volumenstrom $Q$ wird nicht korrigiert, da die Pumpe das Gesamtvolumen fördert ($Q_{Gas} = Q_{Flüssig}$). Nur $H$ und $\eta$ werden korrigiert:
