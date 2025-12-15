@@ -799,9 +799,9 @@ elif st.session_state.page == "mph":
         ### 2️⃣ Basiswerte (Flüssig-Kennlinie)
         - H₀ (Basis-Förderhöhe bei Q): **{H0:.2f} m**
         - η₀ (Basis-Wirkungsgrad bei Q): **{eta0:.3f}**
-
+        
         ### 3️⃣ Derating-Faktoren berechnen
-        Die Derating-Faktoren $F_H$ und $F_{\eta}$ werden basierend auf dem GVF berechnet (hier nach empirischen Formeln, z.B. Samoilov-Ansatz):
+        Die Derating-Faktoren $F_H$ und $F_{\eta}$ werden basierend auf dem GVF berechnet (hier nach empirischen Formeln, z.B. Samoilov-Ansatz)
         **Förderhöhen-Faktor ($F_H$):**
         $$F_H = 1.0 - 1.4 \cdot (\text{{GVF}}^{{0.85}}) = {fH:.3f}$$
         Derating: **{(1-fH)*100:.1f} %**
