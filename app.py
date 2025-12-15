@@ -726,15 +726,16 @@ elif st.session_state.page == "mph":
     st.pyplot(fig2, clear_figure=True)
 
 # ---------------------------
-    # Rechenweg Mehrphasen
+    # Rechenweg Mehrphasen (BEREINIGT)
     # ---------------------------
     with st.expander("📘 Rechenweg & Gas-Derating Theorie", expanded=False):
         fH = gas_derating_factor_H(gvf)
         feta = gas_derating_factor_eta(gvf)
 
+        # Wichtig: Diese Zeile manuell tippen, um unsichtbare Zeichen zu vermeiden
         st.markdown(f"""
         ## Gas-Derating (Vereinfachtes Modell)
-        
+
         Dieses Modell simuliert die Reduktion von Förderhöhe (H) und Wirkungsgrad (η) einer Kreiselpumpe bei der Förderung eines Mediums mit einem **Gasvolumenanteil (GVF)**.
 
         ### 1️⃣ Gegeben
@@ -748,6 +749,7 @@ elif st.session_state.page == "mph":
 
         ### 3️⃣ Derating-Faktoren berechnen
         Die Derating-Faktoren $F_H$ und $F_{\eta}$ werden basierend auf dem GVF berechnet (hier mit den implementierten empirischen Formeln):
+        
         * **Förderhöhen-Faktor ($F_H$):**
             $$F_H = 1.0 - 1.4 \cdot (\text{{GVF}}^{{0.85}}) = {fH:.3f}$$
             Derating: **{(1-fH)*100:.1f} %**
