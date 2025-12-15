@@ -812,7 +812,7 @@ elif st.session_state.page == "mph":
             Derating: **{(1-feta)*100:.1f} %**
         
         ### 4️⃣ Berechneter Betriebspunkt (mit Gas)
-        Der Volumenstrom $$Q$$ wird nicht korrigiert, da die Pumpe das Gesamtvolumen fördert ($$Q_{Gas} = Q_{Flüssig}$$). Nur $$H$$ und $$\\eta$$ werden korrigiert:
+        Der Volumenstrom $$Q$$ wird nicht korrigiert, da die Pumpe das **Gesamtvolumen** fördert. Nur $$H$$ (Förderhöhe) und $$\\eta$$ (Wirkungsgrad) werden korrigiert:
         
         ```
         Q_Gas = Q_req = {Q_req:.2f} m³/h
