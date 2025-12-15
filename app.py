@@ -104,10 +104,7 @@ def viscosity_correction_factors(B, nu_cSt):
     
     Returns: (CH, Ceta)
     """
-    # Für wasserähnliche Medien keine Korrektur
-    if nu_cSt <= 1.5:
-        return 1.0, 1.0
-    
+    # ALLE Medien werden umgerechnet (auch Wasser)
     if B <= 1.0:
         return 1.0, 1.0
     
@@ -441,15 +438,13 @@ if "page" not in st.session_state:
 # Navigation
 with st.sidebar:
     st.header("📍 Navigation")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     if col1.button("🔄 Pumpen", use_container_width=True):
         st.session_state.page = "pump"
-    if col2.button("💧 Sättigung", use_container_width=True):
-        st.session_state.page = "sat"
-    if col3.button("⚗️ Mehrphasen", use_container_width=True):
+    if col2.button("⚗️ Mehrphasen", use_container_width=True):
         st.session_state.page = "mph"
     
-    page_names = {"pump": "Pumpen", "sat": "Sättigung", "mph": "Mehrphasen"}
+    page_names = {"pump": "Pumpen", "mph": "Mehrphasen"}
     st.info(f"**Aktiv:** {page_names.get(st.session_state.page, 'Pumpen')}")
 
 # =========================================================
@@ -489,10 +484,10 @@ if st.session_state.page == "pump":
     Ceta = conv["Ceta"]
     
     # Info-Box
-    if nu <= 1.5:
-        st.info("✅ Medium ist wasserähnlich (ν ≤ 1.5 cSt) → Keine Viskositätskorrektur nötig")
+    if B < 1.0:
+        st.info(f"✅ B = {B:.2f} < 1.0 → Geringe Viskositätseffekte")
     else:
-        st.warning(f"⚠️ Viskoses Medium (ν = {nu:.1f} cSt) → Korrektur erforderlich")
+        st.warning(f"⚠️ B = {B:.2f} ≥ 1.0 → Viskositätskorrektur erforderlich")
     
     # Ergebnisse Umrechnung
     st.markdown("### 📊 Umrechnung viskos → Wasser")
