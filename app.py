@@ -725,6 +725,60 @@ elif st.session_state.page == "mph":
     ax2.legend()
     st.pyplot(fig2, clear_figure=True)
 
+    # ---------------------------
+    # Rechenweg Mehrphasen
+    # ---------------------------
+    with st.expander("📘 Rechenweg & Gas-Derating Theorie", expanded=False):
+        fH = gas_derating_factor_H(gvf)
+        feta = gas_derating_factor_eta(gvf)
+
+        st.markdown(f"""
+        ## Gas-Derating (Vereinfachtes Modell)
+        
+        Dieses Modell simuliert die Reduktion von Förderhöhe (H) und Wirkungsgrad (η) einer Kreiselpumpe bei der Förderung eines Mediums mit einem **Gasvolumenanteil (GVF)**.
+
+        ### 1️⃣ Gegeben
+        - Erforderlicher Volumenstrom Q: **{Q_req:.2f} m³/h**
+        - Gasvolumenanteil (Input) GVF: **{gvf:.3f}**
+        - Gewählte Pumpe (Basis): **{pump["id"]}**
+
+        ### 2️⃣ Basiswerte (Flüssig-Kennlinie)
+        - H₀ (Basis-Förderhöhe bei Q): **{H0:.2f} m**
+        - η₀ (Basis-Wirkungsgrad bei Q): **{eta0:.3f}**
+
+        ### 3️⃣ Derating-Faktoren berechnen
+        Die Derating-Faktoren $F_H$ und $F_{\eta}$ werden basierend auf dem GVF berechnet (hier mit den implementierten empirischen Formeln):
+        
+        * **Förderhöhen-Faktor ($F_H$):**
+            $$F_H = 1.0 - k \cdot (\text{GVF}^x) = 1.0 - 1.4 \cdot ({gvf:.3f}^{0.85}) = {fH:.3f}$$
+            Derating: **{(1-fH)*100:.1f} %**
+
+        * **Wirkungsgrad-Faktor ($F_{\eta}$):**
+            $$F_\eta = 1.0 - k \cdot (\text{GVF}^x) = 1.0 - 2.0 \cdot ({gvf:.3f}^{0.9}) = {feta:.3f}$$
+            Derating: **{(1-feta)*100:.1f} %**
+        
+        ### 4️⃣ Berechneter Betriebspunkt (mit Gas)
+        Der Volumenstrom $Q$ bleibt konstant. Nur $H$ und $\eta$ werden korrigiert:
+        
+        * **Förderhöhe $H_{Gas}$:**
+            $$H_{Gas} = H_0 \cdot F_H = {H0:.2f} \cdot {fH:.3f} = {H_g:.2f} \text{ m}$$
+
+        * **Wirkungsgrad $\eta_{Gas}$:**
+            $$\eta_{Gas} = \eta_0 \cdot F_\eta = {eta0:.3f} \cdot {feta:.3f} = {eta_g:.3f}$$
+
+        ---
+        ## 📚 Henry's Law (Gelöstes Gas)
+        
+        Der im oberen Bereich berechnete gelöste Gasgehalt zeigt, wie viel Gas bei **{p_abs:.1f} bar** und **{T_c:.1f}°C** maximal im Medium gelöst sein kann:
+        
+        - Löslichkeit C: **{sat['concentration_mol_L']:.4f} mol/L**
+        - Maximaler GVF bei vollständiger Ausgasung: **{sat['GVF_at_degassing']:.3f}**
+        """)
+
+    # 4) „Sättigungszustand (Q,p) ablesbar“ – einfache Ampel-Logik
+    # ... (Rest des Codes) ...    
+
+    
     # 4) „Sättigungszustand (Q,p) ablesbar“ – einfache Ampel-Logik
     # (Interpretation: wenn GVF im Betrieb > GVF bei Ausgasung -> Ausgasungsrisiko hoch)
     st.markdown("### ✅ Sättigungs-/Ausgasungs-Check (vereinfachte Logik)")
