@@ -381,8 +381,8 @@ elif st.session_state.page == "mph":
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Henry-Löslichkeit C", f"{sat['concentration_mol_L']:.4f} mol/L")
-    col2.metric("Gasvolumen @STP", f"{sat['volume_ratio']:.3f} L/L")
-    col3.metric("GVF bei Ausgasung", f"{sat['GVF_at_degassing']:.3f}")
+    col2.metric("Gasvolumen @Arbeitspunkt", f"{sat['volume_ratio']:.3f} V_Gas/L")
+    col3.metric("Gasvolumenanteil bei Ausgasung", f"{sat['GVF_at_degassing']:.3f}")
 
     st.caption(f"Partialdruck: {sat['partial_pressure_bar']:.2f} bar | Henry H(T): {henry_constant(gas, T_c):.1f} bar·L/mol")
 
@@ -400,10 +400,10 @@ elif st.session_state.page == "mph":
     eta_g = interp_clamped(Q_req, Qg, etag)
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("H_req (≈)", f"{H_req:.1f} m")
-    col2.metric("H_base @Q", f"{H0:.1f} m")
-    col3.metric("H_gas @Q", f"{H_g:.1f} m")
-    col4.metric("η_gas @Q", f"{eta_g:.3f}")
+    col1.metric("H_benötigt (≈)", f"{H_req:.1f} m")
+    col2.metric("H_Wasser @Q", f"{H0:.1f} m")
+    col3.metric("H_Gas @Q", f"{H_g:.1f} m")
+    col4.metric("η_Gas @Q", f"{eta_g:.3f}")
 
     st.divider()
     
