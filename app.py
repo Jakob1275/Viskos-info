@@ -658,7 +658,11 @@ if st.session_state.page == "pump":
         ax3.plot(Q_vis_curve, P_vis_curve, marker="s", linestyle="--", 
                  linewidth=2.5, color="red", label=f"{p['id']} (viskos, ρ={rho_value})") # rho_value ist der Wert aus dem Eingabefeld
     
-        # ... (Betriebspunkte für die Leistung) ...
+        # Betriebspunkte
+        ax1.scatter([Q_water], [H_water], marker="^", s=150, color="blue", 
+                     edgecolors="black", linewidths=2, label="Betriebspunkt (Wasser)", zorder=5)
+        ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=200, color="red", 
+                     linewidths=3, label="Betriebspunkt (viskos)", zorder=5)
 
         ax3.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
         ax3.set_ylabel("Leistungsaufnahme P [kW]", fontsize=12)
