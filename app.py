@@ -543,6 +543,13 @@ if st.session_state.page == "pump":
     p = best["pump"]
     
     st.divider()
+    # Leistungsberechnung
+    eta_water = best["eta_at"]
+    eta_vis = eta_water * Ceta
+    
+    P_hyd_W = rho * G * (Q_vis_req / 3600.0) * H_vis_req
+    P_vis_kW = (P_hyd_W / max(eta_vis, 1e-6)) / 1000.0
+    P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
     st.markdown("### ⚡ Leistung & Motor")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("η_Wasser", f"{eta_water:.3f}")
@@ -560,13 +567,7 @@ if st.session_state.page == "pump":
     if not best["in_range"]:
         st.warning(f"⚠️ Q_Wasser = {Q_water:.1f} m³/h liegt außerhalb der Kennlinie ({min(p['Qw'])}...{max(p['Qw'])} m³/h)")
     
-    # Leistungsberechnung
-    eta_water = best["eta_at"]
-    eta_vis = eta_water * Ceta
-    
-    P_hyd_W = rho * G * (Q_vis_req / 3600.0) * H_vis_req
-    P_vis_kW = (P_hyd_W / max(eta_vis, 1e-6)) / 1000.0
-    P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
+
     
     # Kennlinien generieren
     Q_vis_curve, H_vis_curve, eta_vis_curve = generate_viscous_curve(p, nu)
