@@ -205,8 +205,8 @@ if st.session_state.page == "pump":
     with st.sidebar:
         st.divider()
         st.subheader("⚙️ Eingaben")
-        Q_vis_req = st.number_input("Qᵥ [m³/h]", 0.1, 300.0, 40.0, 1.0)
-        H_vis_req = st.number_input("Hᵥ [m]", 0.1, 300.0, 35.0, 1.0)
+        Q_vis_req = st.number_input("Qᵥ, Förderstrom [m³/h]", 0.1, 300.0, 40.0, 1.0)
+        H_vis_req = st.number_input("Hᵥ, Förderhöhe [m]", 0.1, 300.0, 35.0, 1.0)
         mk = st.selectbox("Medium", list(MEDIA.keys()), 0)
         rho_def, nu_def = MEDIA[mk]
         rho = st.number_input("ρ [kg/m³]", 1.0, 2000.0, float(rho_def), 5.0)
