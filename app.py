@@ -638,14 +638,6 @@ if st.session_state.page == "pump":
         ```
         
         ---
-        
-        ## ⚠️ Wichtige Unterschiede zum alten Code
-        
-        ✅ **Q bleibt konstant** - nur H und η werden korrigiert  
-        ✅ **Korrekte B-Formel** nach Hydraulic Institute  
-        ✅ **Keine iterative Rückrechnung** - direkte Umrechnung  
-        ✅ **Physikalisch sinnvoll** - entspricht Praxisbeispielen  
-        
         ## 📚 Normenbezug
         - Hydraulic Institute Standards (ANSI/HI)
         - ISO/TR 17766 (Pumps - Viscosity correction)
@@ -655,7 +647,7 @@ if st.session_state.page == "pump":
 # =========================================================
 # PAGE 2: SÄTTIGUNG
 # =========================================================
-elif st.session_state.page == "sat":
+elif st.session_state.page == "mph":
     st.subheader("💧 Sättigungsanalyse (Mehrphasen)")
     
     with st.sidebar:
