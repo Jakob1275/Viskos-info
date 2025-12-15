@@ -653,6 +653,86 @@ elif st.session_state.page == "mph":
     with st.sidebar:
         st.divider()
         st.subheader("⚙️ Eingaben")
+
+        gas = st.selectbox("Gasmedium", list(HENRY_CONSTANTS.keys()), index=0)
+
+        pump_id = st.selectbox(
+            "Mehrphasenpumpe",
+            [p["id"] for p in MPH_PUMPS],
+            index=0
+        )
+        pump = next(p for p in MPH_PUMPS if p["id"] == pump_id)
+
+        T_c = st.number_input("Temperatur T [°C]", min_value=-10.0, max_value=200.0, value=20.0, step=1.0)
+        p_abs = st.number_input("Druck p_abs [bar]", min_value=0.1, max_value=200.0, value=5.0, step=0.1)
+
+        gvf = st.slider("Gasanteil GVF [-]", 0.0, 0.95, 0.10, 0.01)
+        Q_req = st.number_input("Betriebspunkt Q [m³/h]", min_value=0.1, max_value=float(pump["Q_max_m3h"]), value=min(40.0, float(pump["Q_max_m3h"])), step=1.0)
+
+        gas_fraction = st.slider("Molenbruch Gas im Gasgemisch [-]", 0.0, 1.0, 1.0, 0.05)
+
+    # 1) Henry: maximal gelöstes Gas
+    sat = max_dissolved_gas_content(gas, p_abs, T_c, gas_fraction=gas_fraction)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Henry-Löslichkeit C", f"{sat['concentration_mol_L']:.4f} mol/L")
+    col2.metric("Gasvolumen @STP", f"{sat['volume_ratio']:.3f} L/L")
+    col3.metric("GVF bei Ausgasung", f"{sat['GVF_at_degassing']:.3f}")
+
+    st.caption(f"Partialdruck: {sat['partial_pressure_bar']:.2f} bar | Henry H(T): {henry_constant(gas, T_c):.1f} bar·L/mol")
+
+    # 2) Löslichkeitskurve C(p)
+    ps, Cs = solubility_curve(gas, T_c, p_range=(0.1, max(20.0, p_abs*1.2)), n=120)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.plot(ps, Cs, marker=None)
+    ax.scatter([p_abs], [sat["concentration_mol_L"]], s=80)
+    ax.set_xlabel("Druck p_abs [bar]")
+    ax.set_ylabel("Löslichkeit C [mol/L]")
+    ax.set_title(f"Löslichkeitskurve nach Henry (Gas: {gas}, T={T_c:.1f}°C)")
+    ax.grid(True, alpha=0.3)
+    st.pyplot(fig, clear_figure=True)
+
+    st.divider()
+
+    # 3) MPH-Kennlinie und Gas-Derating
+    H_req = p_abs * 10.197  # grob bar->mWS
+
+    H0 = interp_clamped(Q_req, pump["Q_base"], pump["H_base"])
+    eta0 = interp_clamped(Q_req, pump["Q_base"], pump["eta_base"])
+
+    Qg, Hg, etag = apply_gas_derating_curve(pump["Q_base"], pump["H_base"], pump["eta_base"], gvf)
+
+    H_g = interp_clamped(Q_req, Qg, Hg)
+    eta_g = interp_clamped(Q_req, Qg, etag)
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("H_req (≈)", f"{H_req:.1f} m")
+    col2.metric("H_base @Q", f"{H0:.1f} m")
+    col3.metric("H_gas @Q", f"{H_g:.1f} m")
+    col4.metric("η_gas @Q", f"{eta_g:.3f}")
+
+    # Plot Q-H base vs gas
+    fig2, ax2 = plt.subplots(figsize=(9, 5))
+    ax2.plot(pump["Q_base"], pump["H_base"], linewidth=2, label="MPH Basis")
+    ax2.plot(Qg, Hg, linewidth=2, linestyle="--", label=f"MPH mit Gas (GVF={gvf:.2f})")
+    ax2.scatter([Q_req], [H_req], s=90, marker="^", label="Betriebspunkt (Anforderung)")
+    ax2.scatter([Q_req], [H_g], s=90, marker="x", label="Betriebspunkt (Gas-derated)")
+    ax2.set_xlabel("Volumenstrom Q [m³/h]")
+    ax2.set_ylabel("Förderhöhe H [m]")
+    ax2.set_title("Gaskennlinie aus MPH-Kennlinie (Derating)")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    st.pyplot(fig2, clear_figure=True)
+
+    # 4) „Sättigungszustand (Q,p) ablesbar“ – einfache Ampel-Logik
+    # (Interpretation: wenn GVF im Betrieb > GVF bei Ausgasung -> Ausgasungsrisiko hoch)
+    st.markdown("### ✅ Sättigungs-/Ausgasungs-Check (vereinfachte Logik)")
+    if gvf > sat["GVF_at_degassing"]:
+        st.warning("⚠️ Eingestellter GVF liegt über dem GVF, der sich bei Ausgasung aus gelöstem Gas ergeben würde → Ausgasung/Blasenbildung plausibel.")
+    else:
+        st.success("✅ Eingestellter GVF liegt im Bereich des aus Henry-Löslichkeit ableitbaren Zustands (vereinfachte Plausibilität).")
+        
         mode = st.radio("Berechnungsmodus", 
                        ["T_sätt aus p_abs", "p_sätt aus T"], 
                        index=0)
