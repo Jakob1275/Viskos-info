@@ -812,14 +812,13 @@ elif st.session_state.page == "mph":
             Derating: **{(1-feta)*100:.1f} %**
         
         ### 4️⃣ Berechneter Betriebspunkt (mit Gas)
-        Der Volumenstrom $Q$ wird nicht korrigiert, da die Pumpe das Gesamtvolumen fördert ($Q_{Gas} = Q_{Flüssig}$). Nur $H$ und $\eta$ werden korrigiert:
+        Der Volumenstrom $$Q$$ wird nicht korrigiert, da die Pumpe das Gesamtvolumen fördert ($$Q_{Gas} = Q_{Flüssig}$$). Nur $$H$$ und $$\\eta$$ werden korrigiert:
         
         ```
         Q_Gas = Q_req = {Q_req:.2f} m³/h
         H_Gas = H₀ × F_H = {H0:.2f} × {fH:.3f} = {H_g:.2f} m
         η_Gas = η₀ × F_η = {eta0:.3f} × {feta:.3f} = {eta_g:.3f}
         ```
-
         ---
         ## 📚 Henry's Law (Gelöstes Gas)
         
