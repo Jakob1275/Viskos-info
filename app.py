@@ -6,472 +6,189 @@ from iapws import IAPWS97
 G = 9.80665  # m/s²
 
 # ---------------------------
-# 5 typische Pumpenkennlinien (Wasser) – Demo-Daten
+# Pumpenkennlinien mit Leistung
 # ---------------------------
 PUMPS = [
-    # ----------------------------------------------------------------------
-    # P1: Klein, steil (Geringer Durchfluss, hoher Druckabfall)
-    # ----------------------------------------------------------------------
-    {"id": "P1",
-     "Qw": [0, 15, 30, 45, 60],        # Volumenstrom [m³/h]
-     "Hw": [55, 53, 48, 40, 28],        # Förderhöhe Wasser [m]
-     "eta": [0.28, 0.52, 0.68, 0.66, 0.52], # Wirkungsgrad [-]
-     # NEU: Leistungsaufnahme Wasser [kW]. Bei Qw=0: Sperrleistung > 0.
-     "Pw": [1.1, 3.9, 5.8, 6.2, 7.3] 
-     },
-    
-    # ----------------------------------------------------------------------
-    # P2: Mittel, ausgewogen
-    # ----------------------------------------------------------------------
-    {"id": "P2",
-     "Qw": [0, 20, 40, 60, 80],
-     "Hw": [48, 46, 40, 30, 18],
-     "eta": [0.30, 0.60, 0.72, 0.68, 0.55],
-     # NEU
-     "Pw": [1.5, 4.2, 7.4, 8.5, 9.2]
-     },
-    
-    # ----------------------------------------------------------------------
-    # P3: Höherer Durchfluss (Flachere Kennlinie)
-    # ----------------------------------------------------------------------
-    {"id": "P3",
-     "Qw": [0, 30, 60, 90, 120],
-     "Hw": [42, 41, 36, 26, 14],
-     "eta": [0.25, 0.55, 0.73, 0.70, 0.58],
-     # NEU
-     "Pw": [1.8, 6.0, 10.3, 11.0, 10.5]
-     },
-    
-    # ----------------------------------------------------------------------
-    # P4: Höhere Förderhöhe
-    # ----------------------------------------------------------------------
-    {"id": "P4",
-     "Qw": [0, 15, 30, 45, 60],
-     "Hw": [70, 68, 62, 52, 40],
-     "eta": [0.22, 0.48, 0.66, 0.65, 0.50],
-     # NEU
-     "Pw": [2.0, 5.5, 9.0, 10.5, 11.5]
-     },
-    
-    # ----------------------------------------------------------------------
-    # P5: Flacher, effizient im mittleren Bereich
-    # ----------------------------------------------------------------------
-    {"id": "P5",
-     "Qw": [0, 25, 50, 75, 100],
-     "Hw": [46, 44, 38, 28, 16],
-     "eta": [0.30, 0.62, 0.75, 0.72, 0.60],
-     # NEU
-     "Pw": [1.4, 4.5, 7.5, 8.0, 7.8]
-     },
+    {"id": "P1", "Qw": [0, 15, 30, 45, 60], "Hw": [55, 53, 48, 40, 28],
+     "eta": [0.28, 0.52, 0.68, 0.66, 0.52], "Pw": [1.1, 3.9, 5.8, 6.2, 7.3]},
+    {"id": "P2", "Qw": [0, 20, 40, 60, 80], "Hw": [48, 46, 40, 30, 18],
+     "eta": [0.30, 0.60, 0.72, 0.68, 0.55], "Pw": [1.5, 4.2, 7.4, 8.5, 9.2]},
+    {"id": "P3", "Qw": [0, 30, 60, 90, 120], "Hw": [42, 41, 36, 26, 14],
+     "eta": [0.25, 0.55, 0.73, 0.70, 0.58], "Pw": [1.8, 6.0, 10.3, 11.0, 10.5]},
+    {"id": "P4", "Qw": [0, 15, 30, 45, 60], "Hw": [70, 68, 62, 52, 40],
+     "eta": [0.22, 0.48, 0.66, 0.65, 0.50], "Pw": [2.0, 5.5, 9.0, 10.5, 11.5]},
+    {"id": "P5", "Qw": [0, 25, 50, 75, 100], "Hw": [46, 44, 38, 28, 16],
+     "eta": [0.30, 0.62, 0.75, 0.72, 0.60], "Pw": [1.4, 4.5, 7.5, 8.0, 7.8]},
 ]
 
-# ---------------------------
-# Medium-Datenbank (typische Richtwerte)
-# ---------------------------
 MEDIA = {
     "Wasser (20°C)": (998.0, 1.0),
     "Wasser (60°C)": (983.0, 0.47),
-    "Glykol 30% (20°C) (typ.)": (1040.0, 3.5),
-    "Hydrauliköl ISO VG 32 (40°C) (typ.)": (860.0, 32.0),
-    "Hydrauliköl ISO VG 46 (40°C) (typ.)": (870.0, 46.0),
-    "Hydrauliköl ISO VG 68 (40°C) (typ.)": (880.0, 68.0),
+    "Glykol 30% (20°C)": (1040.0, 3.5),
+    "Hydrauliköl ISO VG 32 (40°C)": (860.0, 32.0),
+    "Hydrauliköl ISO VG 46 (40°C)": (870.0, 46.0),
+    "Hydrauliköl ISO VG 68 (40°C)": (880.0, 68.0),
 }
 
-# ---------------------------
-# Helpers
-# ---------------------------
+MPH_PUMPS = [
+    {"id": "MPH-100 (Twin-Screw)", "type": "Schraubenspindel", "Q_max_m3h": 100,
+     "p_max_bar": 40, "GVF_max": 0.95, "Q_base": [0, 20, 40, 60, 80, 100],
+     "H_base": [35, 34, 32, 28, 22, 15], "eta_base": [0.45, 0.62, 0.70, 0.68, 0.60, 0.50]},
+    {"id": "MPH-200 (Helico-Axial)", "type": "Heliko-axial", "Q_max_m3h": 200,
+     "p_max_bar": 30, "GVF_max": 0.85, "Q_base": [0, 40, 80, 120, 160, 200],
+     "H_base": [28, 27, 25, 22, 17, 10], "eta_base": [0.40, 0.58, 0.68, 0.66, 0.58, 0.48]},
+    {"id": "MPH-50 (Compact)", "type": "Schraubenspindel", "Q_max_m3h": 50,
+     "p_max_bar": 50, "GVF_max": 0.90, "Q_base": [0, 10, 20, 30, 40, 50],
+     "H_base": [45, 44, 41, 36, 28, 18], "eta_base": [0.42, 0.60, 0.68, 0.66, 0.58, 0.48]},
+]
+
+HENRY_CONSTANTS = {"CO2": 29.4, "O2": 769.2, "N2": 1639.3, "CH4": 714.3, "H2": 1282.1, "H2S": 10.3}
+HENRY_TEMP_PARAMS = {
+    "CO2": {"A": 29.4, "B": 2400}, "O2": {"A": 769.2, "B": 1500},
+    "N2": {"A": 1639.3, "B": 1300}, "CH4": {"A": 714.3, "B": 1600},
+    "H2": {"A": 1282.1, "B": 500}, "H2S": {"A": 10.3, "B": 2100},
+}
+
+# Helper Functions
 def interp_clamped(x, xs, ys):
-    """Lineare Interpolation mit Clamping an den Rändern"""
-    if len(xs) < 2:
-        return ys[0]
-    if x <= xs[0]:
-        return ys[0]
-    if x >= xs[-1]:
-        return ys[-1]
+    if len(xs) < 2: return ys[0]
+    if x <= xs[0]: return ys[0]
+    if x >= xs[-1]: return ys[-1]
     for i in range(1, len(xs)):
         if x <= xs[i]:
-            x0, y0 = xs[i - 1], ys[i - 1]
-            x1, y1 = xs[i], ys[i]
-            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+            return ys[i-1] + (ys[i] - ys[i-1]) * (x - xs[i-1]) / (xs[i] - xs[i-1])
     return ys[-1]
 
-def clamp(x, a, b):
-    """Wert auf Bereich [a, b] begrenzen"""
-    return max(a, min(b, x))
+def clamp(x, a, b): return max(a, min(b, x))
 
 def motor_iec(P_kW):
-    """Nächstgrößere IEC-Motornennleistung"""
     steps = [0.12, 0.18, 0.25, 0.37, 0.55, 0.75, 1.1, 1.5, 2.2, 3.0, 4.0, 5.5,
              7.5, 11, 15, 18.5, 22, 30, 37, 45, 55, 75]
     for s in steps:
-        if P_kW <= s:
-            return s
+        if P_kW <= s: return s
     return steps[-1]
 
-# ---------------------------
-# KORREKTE Viskositätskorrektur nach Hydraulic Institute
-# ---------------------------
+# Viskositätskorrektur
 def compute_B_HI(Q_m3h, H_m, nu_cSt):
-    """
-    B-Zahl nach Hydraulic Institute Standard
-    B = 16.5 * ν^0.5 / (Q^0.25 * H^0.375)
-    
-    Einheiten: Q in m³/h, H in m, ν in cSt
-    """
-    Q = max(Q_m3h, 1e-6)
-    H = max(H_m, 1e-6)
-    nu = max(nu_cSt, 1e-6)
-    
-    # Umrechnung auf US-Einheiten für HI-Formel
-    Q_gpm = Q * 4.40287  # m³/h -> gal/min
-    H_ft = H * 3.28084   # m -> ft
-    
-    B = 16.5 * (nu ** 0.5) / ((Q_gpm ** 0.25) * (H_ft ** 0.375))
-    return B
+    Q, H, nu = max(Q_m3h, 1e-6), max(H_m, 1e-6), max(nu_cSt, 1e-6)
+    Q_gpm, H_ft = Q * 4.40287, H * 3.28084
+    return 16.5 * (nu ** 0.5) / ((Q_gpm ** 0.25) * (H_ft ** 0.375))
 
 def viscosity_correction_factors(B, nu_cSt):
-    """
-    Korrekturfaktoren nach Hydraulic Institute (empirische Formeln)
-    
-    WICHTIG: Q bleibt konstant (CQ = 1.0)!
-    Nur H und η werden korrigiert.
-    
-    Returns: (CH, Ceta)
-    """
-    # ALLE Medien werden umgerechnet (auch Wasser)
-    if B <= 1.0:
-        return 1.0, 1.0
-    
-    # Empirische Formeln (basierend auf HI-Kurven)
-    # Diese sind Näherungen - für echte Auslegung HI-Diagramme verwenden!
-    
-    # Förderhöhen-Korrekturfaktor
+    if B <= 1.0: return 1.0, 1.0
     CH = math.exp(-0.165 * (math.log10(B) ** 2.2))
     CH = clamp(CH, 0.3, 1.0)
-    
-    # Wirkungsgrad-Korrekturfaktor
     log_B = math.log10(B)
     Ceta = 1.0 - 0.25 * log_B - 0.05 * (log_B ** 2)
     Ceta = clamp(Ceta, 0.1, 1.0)
-    
     return CH, Ceta
 
 def viscous_to_water_point(Q_vis, H_vis, nu_cSt):
-    """
-    KORREKTE Umrechnung: viskoses Medium -> Wasserkennlinie
-    
-    Q bleibt konstant! Nur H wird korrigiert.
-    """
     B = compute_B_HI(Q_vis, H_vis, nu_cSt)
     CH, Ceta = viscosity_correction_factors(B, nu_cSt)
-    
-    Q_water = Q_vis  # Q bleibt gleich!
-    H_water = H_vis / CH  # H muss höher sein auf Wasserkennlinie
-    
-    return {
-        "B": B,
-        "CH": CH,
-        "Ceta": Ceta,
-        "Q_water": Q_water,
-        "H_water": H_water
-    }
+    return {"B": B, "CH": CH, "Ceta": Ceta, "Q_water": Q_vis, "H_water": H_vis / CH}
 
 def water_to_viscous_point(Q_water, H_water, eta_water, nu_cSt):
-    """
-    KORREKTE Umrechnung: Wasserkennlinie -> viskoses Medium
-    
-    Q bleibt konstant! H und η werden korrigiert.
-    """
-    Q_vis = Q_water  # Q bleibt gleich!
-    
-    # B-Zahl für vorläufigen viskosen Punkt berechnen
-    # (Näherung: H_vis ≈ H_water zunächst)
-    B = compute_B_HI(Q_vis, H_water, nu_cSt)
+    B = compute_B_HI(Q_water, H_water, nu_cSt)
     CH, Ceta = viscosity_correction_factors(B, nu_cSt)
-    
-    H_vis = H_water * CH  # Förderhöhe sinkt bei Viskosität
-    eta_vis = eta_water * Ceta  # Wirkungsgrad sinkt bei Viskosität
-    
-    return Q_vis, H_vis, max(1e-6, eta_vis)
+    return Q_water, H_water * CH, max(1e-6, eta_water * Ceta)
 
-def generate_viscous_curve(pump, nu_cSt):
-    """Erzeugt viskose Kennlinie aus Wasserkennlinie"""
-    Q_vis = []
-    H_vis = []
-    eta_vis = []
-    
+def generate_viscous_curve(pump, nu_cSt, rho):
+    Q_vis, H_vis, eta_vis, P_vis = [], [], [], []
     for Q_w, H_w, eta_w in zip(pump["Qw"], pump["Hw"], pump["eta"]):
         Q_v, H_v, eta_v = water_to_viscous_point(Q_w, H_w, eta_w, nu_cSt)
+        P_v = (rho * G * Q_v * H_v) / (3600 * 1000 * max(eta_v, 1e-6))
         Q_vis.append(Q_v)
         H_vis.append(H_v)
         eta_vis.append(eta_v)
-    
-    return Q_vis, H_vis, eta_vis
+        P_vis.append(P_v)
+    return Q_vis, H_vis, eta_vis, P_vis
 
-
-
-# ---------------------------
-# Pumpenauswahl
-# ---------------------------
 def choose_best_pump(pumps, Q_water, H_water, allow_out_of_range=True):
-    """
-    Wählt beste Pumpe basierend auf Wasserkennlinie
-    """
     best = None
-    
     for p in pumps:
         qmin, qmax = min(p["Qw"]), max(p["Qw"])
         in_range = (qmin <= Q_water <= qmax)
-        
-        if not in_range and not allow_out_of_range:
-            continue
-        
+        if not in_range and not allow_out_of_range: continue
         Q_eval = clamp(Q_water, qmin, qmax)
-        penalty = 0.0
-        
-        if not in_range:
-            span = max(qmax - qmin, 1e-9)
-            penalty = abs(Q_water - Q_eval) / span * 10.0
-        
+        penalty = 0.0 if in_range else abs(Q_water - Q_eval) / max(qmax - qmin, 1e-9) * 10.0
         H_at = interp_clamped(Q_eval, p["Qw"], p["Hw"])
         eta_at = interp_clamped(Q_eval, p["Qw"], p["eta"])
-        errH = abs(H_at - H_water)
-        score = errH + penalty
-        
-        cand = {
-            "id": p["id"],
-            "pump": p,
-            "in_range": in_range,
-            "Q_eval": Q_eval,
-            "H_at": H_at,
-            "eta_at": eta_at,
-            "errH": errH,
-            "score": score,
-        }
-        
+        score = abs(H_at - H_water) + penalty
+        cand = {"id": p["id"], "pump": p, "in_range": in_range, "Q_eval": Q_eval,
+                "H_at": H_at, "eta_at": eta_at, "errH": abs(H_at - H_water), "score": score}
         if best is None or score < best["score"] - 1e-9:
             best = cand
         elif abs(score - best["score"]) <= 1e-9 and eta_at > best["eta_at"]:
             best = cand
-    
     return best
 
-# ---------------------------
-# Sättigung (IAPWS-IF97)
-# ---------------------------
+# Sättigung
 def sat_temperature_from_pressure(p_bar_abs):
-    """Sättigungstemperatur aus Druck (IAPWS-IF97)"""
-    p_mpa = p_bar_abs * 0.1
-    w = IAPWS97(P=p_mpa, x=0)
+    w = IAPWS97(P=p_bar_abs * 0.1, x=0)
     return w.T - 273.15
 
 def sat_pressure_from_temperature(t_c):
-    """Sättigungsdruck aus Temperatur (IAPWS-IF97)"""
     w = IAPWS97(T=t_c + 273.15, x=0)
     return w.P * 10.0
 
 def saturation_curve_pT(T_min=0.0, T_max=350.0, n=200):
-    """Sättigungslinie Wasser: p_sätt(T)"""
     Ts = [T_min + (T_max - T_min) * i / (n - 1) for i in range(n)]
     ps = []
     for T in Ts:
-        try:
-            ps.append(sat_pressure_from_temperature(T))
-        except:
-            ps.append(float("nan"))
+        try: ps.append(sat_pressure_from_temperature(T))
+        except: ps.append(float("nan"))
     return Ts, ps
 
-# ---------------------------
-# Gaslöslichkeit (Henry's Law)
-# ---------------------------
-# Henry-Konstanten bei 25°C [bar·L/mol]
-HENRY_CONSTANTS = {
-    "CO2": 29.4,
-    "O2": 769.2,
-    "N2": 1639.3,
-    "CH4": 714.3,
-    "H2": 1282.1,
-    "H2S": 10.3,
-}
-
-# Temperaturabhängigkeit (van't Hoff)
-HENRY_TEMP_PARAMS = {
-    "CO2": {"A": 29.4, "B": 2400},
-    "O2": {"A": 769.2, "B": 1500},
-    "N2": {"A": 1639.3, "B": 1300},
-    "CH4": {"A": 714.3, "B": 1600},
-    "H2": {"A": 1282.1, "B": 500},
-    "H2S": {"A": 10.3, "B": 2100},
-}
-
+# Henry's Law
 def henry_constant(gas, T_celsius):
-    """
-    Temperaturabhängige Henry-Konstante nach van't Hoff:
-    H(T) = H₀ × exp[B × (1/T - 1/T₀)]
-    """
     params = HENRY_TEMP_PARAMS.get(gas)
-    if not params:
-        return HENRY_CONSTANTS.get(gas, 1000.0)
-    
-    T_K = T_celsius + 273.15
-    T0_K = 298.15  # 25°C
-    H0 = params["A"]
-    B = params["B"]
-    
-    H_T = H0 * math.exp(B * (1/T_K - 1/T0_K))
-    return H_T
+    if not params: return HENRY_CONSTANTS.get(gas, 1000.0)
+    T_K, T0_K = T_celsius + 273.15, 298.15
+    return params["A"] * math.exp(params["B"] * (1/T_K - 1/T0_K))
 
 def gas_solubility_henry(gas, p_partial_bar, T_celsius):
-    """
-    Gaslöslichkeit nach Henry's Law:
-    C = p / H(T)
-    
-    Returns: Konzentration [mol/L]
-    """
-    H = henry_constant(gas, T_celsius)
-    C = p_partial_bar / H
-    return C
+    return p_partial_bar / henry_constant(gas, T_celsius)
 
 def max_dissolved_gas_content(gas, p_total_bar, T_celsius, gas_fraction=1.0):
-    """
-    Maximaler gelöster Gasgehalt bei Sättigung
-    
-    Args:
-        gas: Gastyp
-        p_total_bar: Gesamtdruck [bar abs]
-        T_celsius: Temperatur [°C]
-        gas_fraction: Molenbruch des Gases im Gasgemisch [-]
-    
-    Returns: dict mit Löslichkeit und Volumenanteil
-    """
     p_partial = p_total_bar * gas_fraction
     C_mol_L = gas_solubility_henry(gas, p_partial, T_celsius)
-    
-    # Umrechnung auf Volumenanteil (bei Standardbedingungen)
-    # 1 mol Gas = 22.4 L bei STP
     V_gas_L_per_L = C_mol_L * 22.4
-    
-    # GVF bei Ausgasung
     GVF = V_gas_L_per_L / (1.0 + V_gas_L_per_L)
-    
-    return {
-        "concentration_mol_L": C_mol_L,
-        "volume_ratio": V_gas_L_per_L,
-        "GVF_at_degassing": GVF,
-        "partial_pressure_bar": p_partial
-    }
+    return {"concentration_mol_L": C_mol_L, "volume_ratio": V_gas_L_per_L,
+            "GVF_at_degassing": GVF, "partial_pressure_bar": p_partial}
 
 def solubility_curve(gas, T_celsius, p_range=(0.1, 20.0), n=100):
-    """
-    Löslichkeitskurve C(p) bei konstanter Temperatur
-    """
     ps = [p_range[0] + (p_range[1] - p_range[0]) * i / (n - 1) for i in range(n)]
     Cs = [gas_solubility_henry(gas, p, T_celsius) for p in ps]
     return ps, Cs
 
-# ---------------------------
-# Mehrphasenpumpen-Datenbank
-# ---------------------------
-MPH_PUMPS = [
-    {
-        "id": "MPH-100 (Twin-Screw)",
-        "type": "Schraubenspindelpumpe",
-        "Q_max_m3h": 100,
-        "p_max_bar": 40,
-        "GVF_max": 0.95,
-        "Q_base": [0, 20, 40, 60, 80, 100],
-        "H_base": [35, 34, 32, 28, 22, 15],
-        "eta_base": [0.45, 0.62, 0.70, 0.68, 0.60, 0.50],
-    },
-    {
-        "id": "MPH-200 (Helico-Axial)",
-        "type": "Heliko-axial",
-        "Q_max_m3h": 200,
-        "p_max_bar": 30,
-        "GVF_max": 0.85,
-        "Q_base": [0, 40, 80, 120, 160, 200],
-        "H_base": [28, 27, 25, 22, 17, 10],
-        "eta_base": [0.40, 0.58, 0.68, 0.66, 0.58, 0.48],
-    },
-    {
-        "id": "MPH-50 (Compact Twin-Screw)",
-        "type": "Schraubenspindelpumpe",
-        "Q_max_m3h": 50,
-        "p_max_bar": 50,
-        "GVF_max": 0.90,
-        "Q_base": [0, 10, 20, 30, 40, 50],
-        "H_base": [45, 44, 41, 36, 28, 18],
-        "eta_base": [0.42, 0.60, 0.68, 0.66, 0.58, 0.48],
-    },
-]
-
-def choose_mph_pump(Q_req, p_req, GVF_req):
-    """
-    Wählt geeignete Mehrphasenpumpe basierend auf Anforderungen
-    """
-    H_req = p_req * 10.197  # bar -> m Wassersäule (näherungsweise)
-    
-    candidates = []
-    for pump in MPH_PUMPS:
-        if Q_req > pump["Q_max_m3h"]:
-            continue
-        if GVF_req > pump["GVF_max"]:
-            continue
-        
-        # Förderhöhe bei Q prüfen
-        H_at_Q = interp_clamped(Q_req, pump["Q_base"], pump["H_base"])
-        
-        if H_at_Q >= H_req * 0.8:  # 80% Sicherheitsfaktor
-            score = abs(H_at_Q - H_req) + abs(Q_req - pump["Q_max_m3h"]/2) * 0.1
-            candidates.append({
-                "pump": pump,
-                "H_at_Q": H_at_Q,
-                "score": score
-            })
-    
-    if not candidates:
-        return None
-    
-    return min(candidates, key=lambda x: x["score"])
-
-# ---------------------------
-# Gas-Derating (vereinfacht)
-# ---------------------------
-def gas_derating_factor_H(gvf, k=1.4, exp=0.85):
-    """Förderhöhen-Derating bei Gasanteil"""
-    gvf = clamp(gvf, 0.0, 0.6)
-    f = 1.0 - k * (gvf ** exp)
-    return clamp(f, 0.2, 1.0)
-
-def gas_derating_factor_eta(gvf, k=2.0, exp=0.9):
-    """Wirkungsgrad-Derating bei Gasanteil"""
-    gvf = clamp(gvf, 0.0, 0.6)
-    f = 1.0 - k * (gvf ** exp)
-    return clamp(f, 0.1, 1.0)
+# Gas-Derating
+def gas_derating_factor_H(gvf): return clamp(1.0 - 1.4 * (clamp(gvf, 0, 0.6) ** 0.85), 0.2, 1.0)
+def gas_derating_factor_eta(gvf): return clamp(1.0 - 2.0 * (clamp(gvf, 0, 0.6) ** 0.9), 0.1, 1.0)
 
 def apply_gas_derating_curve(Q, H, eta, gvf):
-    """Wendet Gas-Derating auf Kennlinie an"""
-    fH = gas_derating_factor_H(gvf)
-    feta = gas_derating_factor_eta(gvf)
-    Hg = [h * fH for h in H]
-    etag = [max(1e-6, e * feta) for e in eta]
-    return Q, Hg, etag
+    fH, feta = gas_derating_factor_H(gvf), gas_derating_factor_eta(gvf)
+    return Q, [h * fH for h in H], [max(1e-6, e * feta) for e in eta]
 
-# ---------------------------
+def choose_mph_pump(Q_req, p_req, GVF_req):
+    H_req = p_req * 10.197
+    candidates = []
+    for pump in MPH_PUMPS:
+        if Q_req > pump["Q_max_m3h"] or GVF_req > pump["GVF_max"]: continue
+        H_at_Q = interp_clamped(Q_req, pump["Q_base"], pump["H_base"])
+        if H_at_Q >= H_req * 0.8:
+            score = abs(H_at_Q - H_req) + abs(Q_req - pump["Q_max_m3h"]/2) * 0.1
+            candidates.append({"pump": pump, "H_at_Q": H_at_Q, "score": score})
+    return min(candidates, key=lambda x: x["score"]) if candidates else None
+
 # Streamlit App
-# ---------------------------
-st.set_page_config(
-    page_title="Pumpenauslegung: Viskos + Mehrphasen",
-    layout="wide"
-)
-
-st.title("🔧 Pumpenauslegung")
-st.caption("Viskositätskorrektur nach Hydraulic Institute + Mehrphasen-Analyse")
+st.set_page_config(page_title="Pumpenauslegung", layout="wide")
+st.title("🔧 Pumpenauslegungstool")
 
 if "page" not in st.session_state:
     st.session_state.page = "pump"
 
-# Navigation
 with st.sidebar:
     st.header("📍 Navigation")
     col1, col2 = st.columns(2)
@@ -479,195 +196,106 @@ with st.sidebar:
         st.session_state.page = "pump"
     if col2.button("⚗️ Mehrphasen", use_container_width=True):
         st.session_state.page = "mph"
-    
-    page_names = {"pump": "Pumpen", "mph": "Mehrphasen"}
-    st.info(f"**Aktiv:** {page_names.get(st.session_state.page, 'Pumpen')}")
+    st.info(f"**Aktiv:** {'Pumpen' if st.session_state.page=='pump' else 'Mehrphasen'}")
 
-# =========================================================
-# PAGE 1: PUMPEN
-# =========================================================
+# PAGE: PUMPEN
 if st.session_state.page == "pump":
     st.subheader("🔄 Pumpenauswahl mit Viskositätskorrektur")
     
     with st.sidebar:
         st.divider()
         st.subheader("⚙️ Eingaben")
-        
-        Q_vis_req = st.number_input(
-            "Qᵥ (Fördervolumenstrom) [m³/h]",
-            min_value=0.1, max_value=300.0, value=40.0, step=1.0
-        )
-        H_vis_req = st.number_input(
-            "Hᵥ (Förderhöhe) [m]",
-            min_value=0.1, max_value=300.0, value=35.0, step=1.0
-        )
-        
-        mk = st.selectbox("Medium", list(MEDIA.keys()), index=0)
+        Q_vis_req = st.number_input("Qᵥ [m³/h]", 0.1, 300.0, 40.0, 1.0)
+        H_vis_req = st.number_input("Hᵥ [m]", 0.1, 300.0, 35.0, 1.0)
+        mk = st.selectbox("Medium", list(MEDIA.keys()), 0)
         rho_def, nu_def = MEDIA[mk]
-        
-        rho = st.number_input("ρ (Dichte) [kg/m³]", min_value=1.0, value=float(rho_def), step=5.0)
-        nu = st.number_input("ν (kinematische Viskosität) [cSt]", min_value=0.1, value=float(nu_def), step=0.5)
-        
-        allow_out = st.checkbox("Auswahl auch außerhalb Kennlinienbereich", value=True)
+        rho = st.number_input("ρ [kg/m³]", 1.0, 2000.0, float(rho_def), 5.0)
+        nu = st.number_input("ν [cSt]", 0.1, 1000.0, float(nu_def), 0.5)
+        allow_out = st.checkbox("Auswahl außerhalb Kennlinie", True)
         reserve_pct = st.slider("Motorreserve [%]", 0, 30, 15)
     
-    # KORREKTE Berechnung
     conv = viscous_to_water_point(Q_vis_req, H_vis_req, nu)
-    Q_water = conv["Q_water"]
-    H_water = conv["H_water"]
-    B = conv["B"]
-    CH = conv["CH"]
-    Ceta = conv["Ceta"]
+    Q_water, H_water, B, CH, Ceta = conv["Q_water"], conv["H_water"], conv["B"], conv["CH"], conv["Ceta"]
     
-    # Info-Box
-    if B < 1.0:
-        st.info(f"✅ B = {B:.2f} < 1.0 → Geringe Viskositätseffekte")
-    else:
-        st.warning(f"⚠️ B = {B:.2f} ≥ 1.0 → Viskositätskorrektur erforderlich")
+    st.info(f"{'✅' if B < 1.0 else '⚠️'} B = {B:.2f} {'< 1.0 → Geringe Viskositätseffekte' if B < 1.0 else '≥ 1.0 → Viskositätskorrektur erforderlich'}")
     
-    # Ergebnisse Umrechnung
     st.markdown("### 📊 Umrechnung viskos → Wasser")
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Q_Wasser", f"{Q_water:.2f} m³/h", help="Q bleibt konstant!")
-    col2.metric("H_Wasser", f"{H_water:.2f} m", delta=f"+{H_water-H_vis_req:.1f}m")
+    col1.metric("Q_Wasser", f"{Q_water:.2f} m³/h")
+    col2.metric("H_Wasser", f"{H_water:.2f} m", f"+{H_water-H_vis_req:.1f}m")
     col3.metric("B-Zahl", f"{B:.2f}")
     col4.metric("CH / Cη", f"{CH:.3f} / {Ceta:.3f}")
     
-    # Pumpenauswahl
     best = choose_best_pump(PUMPS, Q_water, H_water, allow_out)
-    
-    if best is None:
-        st.error("❌ Keine passende Pumpe gefunden!")
+    if not best:
+        st.error("❌ Keine Pumpe gefunden!")
         st.stop()
     
     p = best["pump"]
-    
-    st.divider()
-    # Leistungsberechnung
-    eta_water = best["eta_at"]
-    eta_vis = eta_water * Ceta
-    
+    eta_water, eta_vis = best["eta_at"], best["eta_at"] * Ceta
     P_hyd_W = rho * G * (Q_vis_req / 3600.0) * H_vis_req
     P_vis_kW = (P_hyd_W / max(eta_vis, 1e-6)) / 1000.0
     P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
-    st.markdown("### ⚡ Leistung & Motor")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("η_Wasser", f"{eta_water:.3f}")
-    col2.metric("η_viskos", f"{eta_vis:.3f}", delta=f"{(eta_vis-eta_water):.3f}")
-    col3.metric("P_viskos", f"{P_vis_kW:.2f} kW")
-    col4.metric(f"Motor (+{reserve_pct}%)", f"{P_motor_kW:.2f} kW")
     
+    # HERVORGEHOBENE ERGEBNISSE
     st.divider()
-    st.markdown("### ✅ Gewählte Pumpe")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Pumpe", best["id"])
-    col2.metric("H_Pumpe (Wasser)", f"{best['H_at']:.2f} m")
-    col3.metric("Abweichung ΔH", f"{best['errH']:.2f} m")
+    st.markdown("### ✅ **AUSLEGUNGSERGEBNIS**")
+    st.success(f"**Gewählte Pumpe: {best['id']}**")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("**H bei Q**", f"**{best['H_at']:.2f} m**")
+    col2.metric("**η_viskos**", f"**{eta_vis:.3f}**")
+    col3.metric("**P_Welle**", f"**{P_vis_kW:.2f} kW**")
+    col4.metric("**Motor**", f"**{P_motor_kW:.2f} kW**")
+    col5.metric("**Reserve**", f"**{reserve_pct}%**")
     
     if not best["in_range"]:
-        st.warning(f"⚠️ Q_Wasser = {Q_water:.1f} m³/h liegt außerhalb der Kennlinie ({min(p['Qw'])}...{max(p['Qw'])} m³/h)")
+        st.warning(f"⚠️ Q außerhalb Kennlinie ({min(p['Qw'])}...{max(p['Qw'])} m³/h)")
     
-
+    Q_vis_curve, H_vis_curve, eta_vis_curve, P_vis_curve = generate_viscous_curve(p, nu, rho)
+    P_water_kW_op = interp_clamped(Q_water, p["Qw"], p["Pw"])
     
-    # Kennlinien generieren
-    Q_vis_curve, H_vis_curve, eta_vis_curve = generate_viscous_curve(p, nu)
- 
-    # ----------------------------------------------------------------------------------
-    # NEU: Berechnung der viskosen Leistungskurve (P_vis_curve)
-    # ----------------------------------------------------------------------------------
-    P_vis_curve = []
-    rho_value = rho # Definiere rho_value zur Verwendung im Label von tab3
-
-    # P_vis = (rho * G * Q * H) / (3600 * 1000 * eta)
-    for Q, H, eta in zip(Q_vis_curve, H_vis_curve, eta_vis_curve):
-        # Berechnung nur durchführen, wenn der Wirkungsgrad eta > 0 ist, um Division durch Null zu vermeiden
-        if eta > 1e-6:
-            # P in kW: (kg/m³ * m/s² * m³/h * m) / (3600 s/h * 1000 W/kW * eta)
-            P_vis = (rho_value * G * Q * H) / (3600 * 1000 * eta)
-        else:
-            # Bei Q=0 (Sperrpunkt) kann Pw als Annäherung genommen werden, da die Formel für eta->0 divergiert
-            # Hier wird der Pw-Wert des ersten Punktes (Q=0) der Wasser-Kennlinie verwendet
-            P_vis = p["Pw"][0] 
-        
-        P_vis_curve.append(P_vis)
-    
-    # Plots
     st.divider()
     st.markdown("### 📈 Kennlinien")
-
-    tab1, tab2, tab3 = st.tabs(["Q-H Kennlinie", "Q-η Kennlinie", "Q-P Kennlinie"])
-
+    tab1, tab2, tab3 = st.tabs(["Q-H", "Q-η", "Q-P"])
+    
     with tab1:
         fig1, ax1 = plt.subplots(figsize=(10, 6))
-
-        # Nur die Wasser-Kennlinie der aktuell gewählten Pumpe (p)
-        ax1.plot(p["Qw"], p["Hw"], marker="o", linestyle="-", 
-                 label=f"{p['id']} (Wasser)", alpha=1.0, linewidth=2, color="blue")
-        
-        # Viskose Kennlinie der gewählten Pumpe
-        ax1.plot(Q_vis_curve, H_vis_curve, marker="s", linestyle="--", 
-                 linewidth=2.5, color="red", label=f"{p['id']} (viskos)")
-    
-        # Betriebspunkte
-        ax1.scatter([Q_water], [H_water], marker="^", s=150, color="blue", 
-                     edgecolors="black", linewidths=2, label="Betriebspunkt (Wasser)", zorder=5)
-        ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=200, color="red", 
-                     linewidths=3, label="Betriebspunkt (viskos)", zorder=5)
-    
-        ax1.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
-        ax1.set_ylabel("Förderhöhe H [m]", fontsize=12)
-        ax1.set_title("Q-H Kennlinien: Wasser vs. viskoses Medium", fontsize=14, fontweight="bold")
+        ax1.plot(p["Qw"], p["Hw"], "o-", linewidth=2, color="blue", label=f"{p['id']} (Wasser)")
+        ax1.plot(Q_vis_curve, H_vis_curve, "s--", linewidth=2.5, color="red", label=f"{p['id']} (viskos)")
+        ax1.scatter([Q_water], [H_water], marker="^", s=150, color="blue", edgecolors="black", linewidths=2, label="BP (Wasser)", zorder=5)
+        ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=200, color="red", linewidths=3, label="BP (viskos)", zorder=5)
+        ax1.set_xlabel("Q [m³/h]", fontsize=12)
+        ax1.set_ylabel("H [m]", fontsize=12)
+        ax1.set_title("Q-H Kennlinien", fontsize=14, fontweight="bold")
         ax1.grid(True, alpha=0.3)
-        ax1.legend(loc="best", fontsize=9)
+        ax1.legend(fontsize=9)
         st.pyplot(fig1, clear_figure=True)
-
+    
     with tab2:
         fig2, ax2 = plt.subplots(figsize=(10, 6))
-
-        # Nur der Wasser-Wirkungsgrad der aktuell gewählten Pumpe (p)
-        ax2.plot(p["Qw"], p["eta"], marker="o", linestyle="-", 
-                 label=f"{p['id']} (Wasser)", alpha=1.0, linewidth=2, color="blue")
-    
-        # Viskoser Wirkungsgrad der gewählten Pumpe
-        ax2.plot(Q_vis_curve, eta_vis_curve, marker="s", linestyle="--", 
-                 linewidth=2.5, color="red", label=f"{p['id']} (viskos)")
-    
-        # Betriebspunkte
-        ax2.scatter([Q_water], [eta_water], marker="^", s=150, color="blue", 
-                     edgecolors="black", linewidths=2, label="η (Wasser)", zorder=5)
-        ax2.scatter([Q_vis_req], [eta_vis], marker="x", s=200, color="red", 
-                     linewidths=3, label="η (viskos)", zorder=5)
-    
-        ax2.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
-        ax2.set_ylabel("Wirkungsgrad η [-]", fontsize=12)
-        ax2.set_title("Q-η Kennlinien: Wasser vs. viskoses Medium", fontsize=14, fontweight="bold")
+        ax2.plot(p["Qw"], p["eta"], "o-", linewidth=2, color="blue", label=f"{p['id']} (Wasser)")
+        ax2.plot(Q_vis_curve, eta_vis_curve, "s--", linewidth=2.5, color="red", label=f"{p['id']} (viskos)")
+        ax2.scatter([Q_water], [eta_water], marker="^", s=150, color="blue", edgecolors="black", linewidths=2, label="η (Wasser)", zorder=5)
+        ax2.scatter([Q_vis_req], [eta_vis], marker="x", s=200, color="red", linewidths=3, label="η (viskos)", zorder=5)
+        ax2.set_xlabel("Q [m³/h]", fontsize=12)
+        ax2.set_ylabel("η [-]", fontsize=12)
+        ax2.set_title("Q-η Kennlinien", fontsize=14, fontweight="bold")
         ax2.grid(True, alpha=0.3)
-        ax2.legend(loc="best", fontsize=9)
+        ax2.legend(fontsize=9)
         st.pyplot(fig2, clear_figure=True)
     
     with tab3:
         fig3, ax3 = plt.subplots(figsize=(10, 6))
-
-        # Wasser-Leistung der aktuell gewählten Pumpe (p)
-        # Annahme: 'Pw' ist die Wasserleistung der Pumpe (rho=1000)
-        ax3.plot(p["Qw"], p["Pw"], marker="o", linestyle="-", 
-                 label=f"{p['id']} (Wasser)", alpha=1.0, linewidth=2, color="blue")
-    
-        # Viskose Leistung der gewählten Pumpe (berechnet mit aktueller Dichte rho)
-        # P_vis_curve müsste im Hauptskript basierend auf der aktuellen Dichte rho berechnet werden!
-        ax3.plot(Q_vis_curve, P_vis_curve, marker="s", linestyle="--", 
-                 linewidth=2.5, color="red", label=f"{p['id']} (viskos, ρ={rho_value})") # rho_value ist der Wert aus dem Eingabefeld
-    
-        ax3.scatter([Q_water], [P_water_kW_op], marker="^", s=150, color="blue",
-                     edgecolors="black", linewidths=2, label="Betriebspunkt (Wasser)", zorder=5)
-        ax3.scatter([Q_vis_req], [P_vis_kW], marker="x", s=200, color="red",
-                     linewidths=3, label="Betriebspunkt (viskos)", zorder=5)
-
-        ax3.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
-        ax3.set_ylabel("Leistungsaufnahme P [kW]", fontsize=12)
-        ax3.set_title("Q-P Kennlinien: Auswirkung der Dichte", fontsize=14, fontweight="bold")
+        ax3.plot(p["Qw"], p["Pw"], "o-", linewidth=2, color="blue", label=f"{p['id']} (Wasser)")
+        ax3.plot(Q_vis_curve, P_vis_curve, "s--", linewidth=2.5, color="red", label=f"{p['id']} (viskos, ρ={rho:.0f})")
+        ax3.scatter([Q_water], [P_water_kW_op], marker="^", s=150, color="blue", edgecolors="black", linewidths=2, label="BP (Wasser)", zorder=5)
+        ax3.scatter([Q_vis_req], [P_vis_kW], marker="x", s=200, color="red", linewidths=3, label="BP (viskos)", zorder=5)
+        ax3.set_xlabel("Q [m³/h]", fontsize=12)
+        ax3.set_ylabel("P [kW]", fontsize=12)
+        ax3.set_title("Q-P Kennlinien", fontsize=14, fontweight="bold")
         ax3.grid(True, alpha=0.3)
-        ax3.legend(loc="best", fontsize=9)
+        ax3.legend(fontsize=9)
         st.pyplot(fig3, clear_figure=True)
     
     # Rechenweg
@@ -857,7 +485,7 @@ elif st.session_state.page == "mph":
                                   value=1.013, step=0.1)
 
     
-# ---------------------------
+    # ---------------------------
     # Rechenweg Mehrphasen (FINAL BEREINIGT)
     # ---------------------------
     with st.expander("📘 Rechenweg & Gas-Derating Theorie", expanded=False):
