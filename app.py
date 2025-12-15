@@ -430,61 +430,6 @@ elif st.session_state.page == "mph":
     ax2.legend()
     st.pyplot(fig2, clear_figure=True)
 
-        # 4) „Sättigungszustand (Q,p) ablesbar“ – einfache Ampel-Logik
-    # (Interpretation: wenn GVF im Betrieb > GVF bei Ausgasung -> Ausgasungsrisiko hoch)
-    st.markdown("### ✅ Sättigungs-/Ausgasungs-Check (vereinfachte Logik)")
-    if gvf > sat["GVF_at_degassing"]:
-        st.warning("⚠️ Eingestellter GVF liegt über dem GVF, der sich bei Ausgasung aus gelöstem Gas ergeben würde → Ausgasung/Blasenbildung plausibel.")
-    else:
-        st.success("✅ Eingestellter GVF liegt im Bereich des aus Henry-Löslichkeit ableitbaren Zustands (vereinfachte Plausibilität).")
-        
-        mode = st.radio("Berechnungsmodus", 
-                       ["T_sätt aus p_abs", "p_sätt aus T"], 
-                       index=0)
-    
-    t_sat = None
-    p_sat = None
-    
-    if mode == "T_sätt aus p_abs":
-        col1, col2 = st.columns(2)
-        with col1:
-            p_bar_abs = st.number_input("Druck p_abs [bar]", 
-                                       min_value=0.01, max_value=1000.0, 
-                                       value=1.013, step=0.1)
-            t_op = st.number_input("Betriebstemperatur T_op [°C]", 
-                                  min_value=-20.0, max_value=800.0, 
-                                  value=20.0, step=1.0)
-            margin = st.number_input("Sicherheitsabstand ΔT [K]", 
-                                    min_value=0.0, max_value=50.0, 
-                                    value=5.0, step=0.5)
-        
-        try:
-            t_sat = sat_temperature_from_pressure(p_bar_abs)
-            with col2:
-                st.metric("T_sätt [°C]", f"{t_sat:.2f}")
-                dt = t_sat - t_op
-                st.metric("ΔT = T_sätt - T_op [K]", f"{dt:.2f}")
-                
-                if dt < 0:
-                    st.error("❌ T_op > T_sätt → Flash/Sieden!")
-                elif dt < margin:
-                    st.warning("⚠️ Geringe thermische Reserve")
-                else:
-                    st.success("✅ Ausreichende Reserve")
-        except Exception as e:
-            st.error(f"Fehler: {e}")
-    
-    else:
-        col1, col2 = st.columns(2)
-        with col1:
-            t_c = st.number_input("Temperatur T [°C]", 
-                                 min_value=-20.0, max_value=800.0, 
-                                 value=100.0, step=1.0)
-            p_op = st.number_input("Betriebsdruck p_abs [bar]", 
-                                  min_value=0.01, max_value=1000.0, 
-                                  value=1.013, step=0.1)
-
-    
     # ---------------------------
     # Rechenweg Mehrphasen (FINAL BEREINIGT)
     # ---------------------------
