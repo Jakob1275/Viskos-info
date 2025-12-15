@@ -386,20 +386,8 @@ elif st.session_state.page == "mph":
 
     st.caption(f"Partialdruck: {sat['partial_pressure_bar']:.2f} bar | Henry H(T): {henry_constant(gas, T_c):.1f} bar·L/mol")
 
-    # 2) Löslichkeitskurve C(p)
-    ps, Cs = solubility_curve(gas, T_c, p_range=(0.1, max(20.0, p_abs*1.2)), n=120)
-
-    fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(ps, Cs, marker=None)
-    ax.scatter([p_abs], [sat["concentration_mol_L"]], s=80)
-    ax.set_xlabel("Druck p_abs [bar]")
-    ax.set_ylabel("Löslichkeit C [mol/L]")
-    ax.set_title(f"Löslichkeitskurve nach Henry (Gas: {gas}, T={T_c:.1f}°C)")
-    ax.grid(True, alpha=0.3)
-    st.pyplot(fig, clear_figure=True)
-
     st.divider()
-
+    
     # 3) MPH-Kennlinie und Gas-Derating
     H_req = p_abs * 10.197  # grob bar->mWS
 
@@ -417,6 +405,23 @@ elif st.session_state.page == "mph":
     col3.metric("H_gas @Q", f"{H_g:.1f} m")
     col4.metric("η_gas @Q", f"{eta_g:.3f}")
 
+    st.divider()
+    
+    # 2) Löslichkeitskurve C(p)
+    ps, Cs = solubility_curve(gas, T_c, p_range=(0.1, max(20.0, p_abs*1.2)), n=120)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.plot(ps, Cs, marker=None)
+    ax.scatter([p_abs], [sat["concentration_mol_L"]], s=80)
+    ax.set_xlabel("Druck p_abs [bar]")
+    ax.set_ylabel("Löslichkeit C [mol/L]")
+    ax.set_title(f"Löslichkeitskurve nach Henry (Gas: {gas}, T={T_c:.1f}°C)")
+    ax.grid(True, alpha=0.3)
+    st.pyplot(fig, clear_figure=True)
+
+    st.divider()
+
+   
     # Plot Q-H base vs gas
     fig2, ax2 = plt.subplots(figsize=(9, 5))
     ax2.plot(pump["Q_base"], pump["H_base"], linewidth=2, label="MPH Basis")
@@ -431,7 +436,7 @@ elif st.session_state.page == "mph":
     st.pyplot(fig2, clear_figure=True)
 
     # ---------------------------
-    # Rechenweg Mehrphasen (FINAL BEREINIGT)
+    # Rechenweg Mehrphasen
     # ---------------------------
     with st.expander("📘 Rechenweg & Gas-Derating Theorie", expanded=False):
         fH = gas_derating_factor_H(gvf)
