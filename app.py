@@ -208,28 +208,7 @@ def generate_viscous_curve(pump, nu_cSt):
     
     return Q_vis, H_vis, eta_vis
 
-# Kennlinien generieren
-Q_vis_curve, H_vis_curve, eta_vis_curve = generate_viscous_curve(p, nu)
- 
-# ----------------------------------------------------------------------------------
-# NEU: Berechnung der viskosen Leistungskurve (P_vis_curve)
-# (Behebt NameError: 'P_vis_curve')
-# ----------------------------------------------------------------------------------
-P_vis_curve = []
-rho_value = rho # Definiere rho_value zur Verwendung im Label von tab3
 
-# P_vis = (rho * G * Q * H) / (3600 * 1000 * eta)
-for Q, H, eta in zip(Q_vis_curve, H_vis_curve, eta_vis_curve):
-    # Berechnung nur durchführen, wenn der Wirkungsgrad eta > 0 ist, um Division durch Null zu vermeiden
-    if eta > 1e-6:
-        # P in kW: (kg/m³ * m/s² * m³/h * m) / (3600 s/h * 1000 W/kW * eta)
-        P_vis = (rho_value * G * Q * H) / (3600 * 1000 * eta)
-    else:
-        # Bei Q=0 (Sperrpunkt) kann Pw als Annäherung genommen werden, da die Formel für eta->0 divergiert
-        # Hier wird der Pw-Wert des ersten Punktes (Q=0) der Wasser-Kennlinie verwendet
-        P_vis = p["Pw"][0] 
-        
-    P_vis_curve.append(P_vis)
 
 # ---------------------------
 # Pumpenauswahl
@@ -590,6 +569,25 @@ if st.session_state.page == "pump":
     
     # Kennlinien generieren
     Q_vis_curve, H_vis_curve, eta_vis_curve = generate_viscous_curve(p, nu)
+ 
+    # ----------------------------------------------------------------------------------
+    # NEU: Berechnung der viskosen Leistungskurve (P_vis_curve)
+    # ----------------------------------------------------------------------------------
+    P_vis_curve = []
+    rho_value = rho # Definiere rho_value zur Verwendung im Label von tab3
+
+    # P_vis = (rho * G * Q * H) / (3600 * 1000 * eta)
+    for Q, H, eta in zip(Q_vis_curve, H_vis_curve, eta_vis_curve):
+        # Berechnung nur durchführen, wenn der Wirkungsgrad eta > 0 ist, um Division durch Null zu vermeiden
+        if eta > 1e-6:
+            # P in kW: (kg/m³ * m/s² * m³/h * m) / (3600 s/h * 1000 W/kW * eta)
+            P_vis = (rho_value * G * Q * H) / (3600 * 1000 * eta)
+        else:
+            # Bei Q=0 (Sperrpunkt) kann Pw als Annäherung genommen werden, da die Formel für eta->0 divergiert
+            # Hier wird der Pw-Wert des ersten Punktes (Q=0) der Wasser-Kennlinie verwendet
+            P_vis = p["Pw"][0] 
+        
+        P_vis_curve.append(P_vis)
     
     # Plots
     st.divider()
