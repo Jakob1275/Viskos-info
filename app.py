@@ -589,26 +589,26 @@ if st.session_state.page == "pump":
         st.pyplot(fig2, clear_figure=True)
     
     with tab3:
-    fig3, ax3 = plt.subplots(figsize=(10, 6))
+        fig3, ax3 = plt.subplots(figsize=(10, 6))
 
-    # Wasser-Leistung der aktuell gewählten Pumpe (p)
-    # Annahme: 'Pw' ist die Wasserleistung der Pumpe (rho=1000)
-    ax3.plot(p["Qw"], p["Pw"], marker="o", linestyle="-", 
-             label=f"{p['id']} (Wasser)", alpha=1.0, linewidth=2, color="blue")
+        # Wasser-Leistung der aktuell gewählten Pumpe (p)
+        # Annahme: 'Pw' ist die Wasserleistung der Pumpe (rho=1000)
+        ax3.plot(p["Qw"], p["Pw"], marker="o", linestyle="-", 
+                 label=f"{p['id']} (Wasser)", alpha=1.0, linewidth=2, color="blue")
     
-    # Viskose Leistung der gewählten Pumpe (berechnet mit aktueller Dichte rho)
-    # P_vis_curve müsste im Hauptskript basierend auf der aktuellen Dichte rho berechnet werden!
-    ax3.plot(Q_vis_curve, P_vis_curve, marker="s", linestyle="--", 
-             linewidth=2.5, color="red", label=f"{p['id']} (viskos, ρ={rho_value})") # rho_value ist der Wert aus dem Eingabefeld
+        # Viskose Leistung der gewählten Pumpe (berechnet mit aktueller Dichte rho)
+        # P_vis_curve müsste im Hauptskript basierend auf der aktuellen Dichte rho berechnet werden!
+        ax3.plot(Q_vis_curve, P_vis_curve, marker="s", linestyle="--", 
+                 linewidth=2.5, color="red", label=f"{p['id']} (viskos, ρ={rho_value})") # rho_value ist der Wert aus dem Eingabefeld
     
-    # ... (Betriebspunkte für die Leistung) ...
+        # ... (Betriebspunkte für die Leistung) ...
 
-    ax3.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
-    ax3.set_ylabel("Leistungsaufnahme P [kW]", fontsize=12)
-    ax3.set_title("Q-P Kennlinien: Auswirkung der Dichte", fontsize=14, fontweight="bold")
-    ax3.grid(True, alpha=0.3)
-    ax3.legend(loc="best", fontsize=9)
-    st.pyplot(fig3, clear_figure=True)
+        ax3.set_xlabel("Volumenstrom Q [m³/h]", fontsize=12)
+        ax3.set_ylabel("Leistungsaufnahme P [kW]", fontsize=12)
+        ax3.set_title("Q-P Kennlinien: Auswirkung der Dichte", fontsize=14, fontweight="bold")
+        ax3.grid(True, alpha=0.3)
+        ax3.legend(loc="best", fontsize=9)
+        st.pyplot(fig3, clear_figure=True)
     
     # Rechenweg
     with st.expander("📘 Rechenweg & Theorie", expanded=False):
