@@ -366,7 +366,7 @@ elif st.session_state.page == "mph":
             p_op = None
 
     # Hauptbereich
-    st.markdown("### 📊 Löslichkeit und Mehrphasen-Kennlinien")
+    st.markdown("### 📊 Löslichkeit und Mehrphasen-Phasenanalyse")
 
     # Löslichkeitskurven bei verschiedenen Temperaturen
     temp_variants = [temperature - 10, temperature, temperature + 10]
@@ -378,70 +378,70 @@ elif st.session_state.page == "mph":
     colors_temp = ['blue', 'darkblue', 'lightblue']
     for i, T in enumerate(temp_variants):
         pressures, solubilities = solubility_curve_vs_pressure(gas_medium, T, p_max=14)
-        label = f"Löslichkeit {gas_medium} {T:.0f}°C"
+        label = f"Max. Löslichkeit {gas_medium} {T:.0f}°C"
         ax.plot(pressures, solubilities, '--', linewidth=2, color=colors_temp[i], label=label)
 
-    # Kennlinien bei verschiedenen Gasanteilen (durchgezogen)
-    gvf_variants = [10, 15, 20]
-    colors_gvf = ['lightcoral', 'red', 'darkred']
+    # ----------------------------------------------------------------------
+    # NEU: Darstellung der maximalen GVF-Toleranz der ausgewählten Pumpe
+    # ----------------------------------------------------------------------
+    gvf_max_pump_frac = selected_pump["GVF_max"]
 
-    # Dummy-Kennlinien (in Realität aus Herstellerdaten)
-    # Annahme: Bei höherem GVF sinkt die Löslichkeit effektiv (weniger freies Volumen)
-    for i, gvf in enumerate(gvf_variants):
-        pressures = np.linspace(0, 14, 100)
-        # Vereinfachte "Kennlinie" mit GVF: Löslichkeit wird reduziert
-        base_sol = [gas_solubility_volumetric(gas_medium, p, temperature) * 100 for p in pressures]
-        # Mit GVF: effektive Kapazität sinkt
-        modified_sol = [s * (1 - gvf/100) for s in base_sol]
-        ax.plot(pressures, modified_sol, '-', linewidth=2.5, color=colors_gvf[i], label=f"{gvf}% Luft")
+    # Umrechnung der max. GVF der Pumpe in die Einheit der Y-Achse (cm³/L)
+    # L_L_L = GVF / (1 - GVF)
+    sol_L_L_max_pump = gvf_max_pump_frac / (1.0 - gvf_max_pump_frac) 
+    sol_cm3_L_max_pump = sol_L_L_max_pump * 1000.0 # Löslichkeit in cm³/L
+
+    ax.axhline(sol_cm3_L_max_pump, color='black', linestyle='-', linewidth=3, 
+               label=f"{selected_pump['id']} GVF-Grenze ({gvf_max_pump_frac*100:.0f}%)", 
+               alpha=0.8, zorder=4)
+    # ----------------------------------------------------------------------
+
 
     # GVF-Eingabe in die Einheit cm³/L umrechnen (um auf der Grafik darzustellen)
     if use_gvf and gvf_input is not None:
         gvf_frac = gvf_input / 100.0 # GVF in Fraktion (z.B. 0.10)
     
-        # Umrechnung: GVF = L_L_L / (1 + L_L_L)  ->  L_L_L = GVF / (1 - GVF)
+        # Umrechnung: L_L_L = GVF / (1 - GVF)
         sol_L_L_req = gvf_frac / (1.0 - gvf_frac) 
         sol_cm3_L_req = sol_L_L_req * 1000.0 # Löslichkeit in cm³/L
 
         # Zeichne eine Linie, die den angeforderten Gasanteil bei allen Drücken darstellt
-        # (Dies ist eine Annahme: Der Gasanteil ist unabhängig vom Druck, wenn er vorgegeben ist)
         ax.axhline(sol_cm3_L_req, color='green', linestyle=':', linewidth=2, 
-                   label=f"Angeforderter GVF ({gvf_input:.0f}%)")
+                   label=f"Angeforderter GVF ({gvf_input:.0f}%)", zorder=3)
     
     # Betriebspunkt markieren
     if use_op_point and Q_op and p_op:
         
-        # 1. Berechnung der Löslichkeit am Betriebspunkt (Korrektur der Skalierung)
-        # sol_cm3_L enthält die Löslichkeit in cm³ Gas / Liter Flüssigkeit (direkt aus der Funktion)
+        # 1. Berechnung der Löslichkeit am Betriebspunkt (Korrektur: Multiplikation mit *100 entfernt)
         sol_cm3_L = gas_solubility_volumetric(gas_medium, p_op, temperature) 
-        
-        # Für den Plot: Wir plotten cm³/L (oder l/min, wie in der Y-Achsenbeschriftung)
+    
+        # Für den Plot: Wir plotten cm³/L 
         ax.scatter([p_op], [sol_cm3_L], s=200, marker='o', color='red', 
                     edgecolors='black', linewidths=2, zorder=5, label='Betriebspunkt')
-    
+
         # 2. Berechnung der Metriken (Korrektur der Umrechnung)
-        
-        # Löslichkeit in L Gas / L Flüssigkeit (für korrekte GVF-Berechnung)
-        sol_L_L = sol_cm3_L / 1000.0 # 1000 cm³ = 1 L
-        
+    
+        # Löslichkeit in L Gas / L Flüssigkeit
+        sol_L_L = sol_cm3_L / 1000.0 
+    
         # Maximaler Gasvolumenanteil (GVF) bei diesem Zustand:
-        # GVF = (Vol. Gas) / (Vol. Gas + Vol. Flüssigkeit)
         gvf_max_percent = (sol_L_L / (1.0 + sol_L_L)) * 100
 
         st.markdown("### ✅ **Betriebspunkt Maximaler Löslichkeit**")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("**Druck**", f"**{p_op:.2f} bar**")
         col2.metric("**Temperatur**", f"**{temperature:.1f} °C**")
-        
-        # Metrik 3: Löslichkeit in L/L
-        col3.metric("**Max. Löslichkeit**", f"**{sol_L_L:.3f} L/L**") # 3 Dezimalstellen für L/L
-        
-        # Metrik 4: Löslichkeit in % GVF (Korrekt)
+    
+        # Metrik 3: Löslichkeit in L/L (korrigierte Skalierung)
+        col3.metric("**Max. Löslichkeit**", f"**{sol_L_L:.3f} L/L**") 
+    
+        # Metrik 4: Löslichkeit in % GVF (korrigierte Berechnung)
         col4.metric("**Max. Löslichkeit**", f"**{gvf_max_percent:.1f} % GVF**")
 
     ax.set_xlabel("Druck [bar]", fontsize=13, fontweight='bold')
-    ax.set_ylabel("Löslichkeit [cm³/l] / Gasvolumenstrom [l/min]", fontsize=13, fontweight='bold')
-    ax.set_title("Gaslöslichkeit und Mehrphasen-Kennlinien", fontsize=15, fontweight='bold')
+    # Achsenbeschriftung korrigiert, um l/min zu entfernen, da es nicht geplottet wird
+    ax.set_ylabel("Löslichkeit [cm³/l]", fontsize=13, fontweight='bold') 
+    ax.set_title("Gaslöslichkeit und Mehrphasen-Phasenanalyse", fontsize=15, fontweight='bold')
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
     ax.set_xlim(0, 14)
