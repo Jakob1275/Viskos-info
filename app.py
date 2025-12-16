@@ -123,7 +123,6 @@ def choose_best_pump(pumps, Q_water, H_water, allow_out_of_range=True):
         elif abs(score - best["score"]) <= 1e-9 and eta_at > best["eta_at"]:
             best = cand
     return best
-
 def henry_constant(gas, T_celsius):
     """Temperaturabhängige Henry-Konstante"""
     params = HENRY_CONSTANTS.get(gas, {"A": 1000, "B": 1500})
@@ -132,19 +131,21 @@ def henry_constant(gas, T_celsius):
 
 def gas_solubility_volumetric(gas, p_bar, T_celsius):
     """
-    Löslichkeit als Gasvolumen pro Flüssigkeitsvolumen [L/L]
-    Vereinfachte Berechnung: V_gas/V_liquid = p / H(T) * 22.4
+    Löslichkeit in cm³ Gas pro Liter Flüssigkeit [cm³/L]
+    Nach Henry's Law: C = p / H(T)
+    Umrechnung: mol/L -> cm³/L mit idealem Gasgesetz
     """
     H = henry_constant(gas, T_celsius)
-    # Konzentration in mol/L, dann umrechnen auf L/L
+    # Konzentration in mol/L
     C_mol_L = p_bar / H
-    V_ratio = C_mol_L * 22.4  # 1 mol Gas = 22.4 L bei STP
-    return V_ratio
+    # Umrechnung auf cm³/L: 1 mol Gas = 22400 cm³ bei STP
+    V_cm3_per_L = C_mol_L * 22400
+    return V_cm3_per_L
 
 def solubility_curve_vs_pressure(gas, T_celsius, p_max=14):
-    """Löslichkeitskurve: Gasvolumen/Flüssigkeitsvolumen vs. Druck"""
+    """Löslichkeitskurve: Gasvolumen [cm³/L] vs. Druck [bar]"""
     pressures = np.linspace(0, p_max, 100)
-    solubilities = [gas_solubility_volumetric(gas, p, T_celsius) * 100 for p in pressures]  # in Prozent
+    solubilities = [gas_solubility_volumetric(gas, p, T_celsius) for p in pressures]
     return pressures, solubilities
 
 def mph_derating_curve(pump, gvf_percent):
