@@ -124,6 +124,7 @@ def choose_best_pump(pumps, Q_water, H_water, allow_out_of_range=True):
         elif abs(score - best["score"]) <= 1e-9 and eta_at > best["eta_at"]:
             best = cand
     return best
+    
 def henry_constant(gas, T_celsius):
     """Temperaturabhängige Henry-Konstante"""
     params = HENRY_CONSTANTS.get(gas, {"A": 1000, "B": 1500})
@@ -327,7 +328,7 @@ if st.session_state.page == "pump":
         """)
 
 # =========================================================
-# PAGE 2: SÄTTIGUNG
+# PAGE 2: Mehrphase
 # =========================================================
 elif st.session_state.page == "mph":
     st.subheader("Mehrphasen-Pumpenauswahl")
@@ -394,20 +395,36 @@ elif st.session_state.page == "mph":
         modified_sol = [s * (1 - gvf/100) for s in base_sol]
         ax.plot(pressures, modified_sol, '-', linewidth=2.5, color=colors_gvf[i], label=f"{gvf}% Luft")
 
-    # Betriebspunkt markieren
+# Betriebspunkt markieren
     if use_op_point and Q_op and p_op:
-        # Berechne Löslichkeit am Betriebspunkt
-        sol_at_op = gas_solubility_volumetric(gas_medium, p_op, temperature) * 100
-        ax.scatter([p_op], [sol_at_op], s=200, marker='o', color='red', 
-                   edgecolors='black', linewidths=2, zorder=5, label='Betriebspunkt')
+        
+        # 1. Berechnung der Löslichkeit am Betriebspunkt (Korrektur der Skalierung)
+        # sol_cm3_L enthält die Löslichkeit in cm³ Gas / Liter Flüssigkeit (direkt aus der Funktion)
+        sol_cm3_L = gas_solubility_volumetric(gas_medium, p_op, temperature) 
+        
+        # Für den Plot: Wir plotten cm³/L (oder l/min, wie in der Y-Achsenbeschriftung)
+        ax.scatter([p_op], [sol_cm3_L], s=200, marker='o', color='red', 
+                    edgecolors='black', linewidths=2, zorder=5, label='Betriebspunkt')
     
-        # Maximale Löslichkeit bei diesem Druck
+        # 2. Berechnung der Metriken (Korrektur der Umrechnung)
+        
+        # Löslichkeit in L Gas / L Flüssigkeit (für korrekte GVF-Berechnung)
+        sol_L_L = sol_cm3_L / 1000.0 # 1000 cm³ = 1 L
+        
+        # Maximaler Gasvolumenanteil (GVF) bei diesem Zustand:
+        # GVF = (Vol. Gas) / (Vol. Gas + Vol. Flüssigkeit)
+        gvf_max_percent = (sol_L_L / (1.0 + sol_L_L)) * 100
+
         st.markdown("### ✅ **Betriebspunkt Maximaler Löslichkeit**")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("**Druck**", f"**{p_op:.2f} bar**")
         col2.metric("**Temperatur**", f"**{temperature:.1f} °C**")
-        col3.metric("**Max. Löslichkeit**", f"**{sol_at_op:.1f} L/L**")
-        col4.metric("**Max. Löslichkeit**", f"**{sol_at_op/(1+sol_at_op/100)*100:.1f} % GVF**")
+        
+        # Metrik 3: Löslichkeit in L/L
+        col3.metric("**Max. Löslichkeit**", f"**{sol_L_L:.3f} L/L**") # 3 Dezimalstellen für L/L
+        
+        # Metrik 4: Löslichkeit in % GVF (Korrekt)
+        col4.metric("**Max. Löslichkeit**", f"**{gvf_max_percent:.1f} % GVF**")
 
     ax.set_xlabel("Druck [bar]", fontsize=13, fontweight='bold')
     ax.set_ylabel("Löslichkeit [cm³/l] / Gasvolumenstrom [l/min]", fontsize=13, fontweight='bold')
@@ -443,9 +460,11 @@ elif st.session_state.page == "mph":
             if gvf_input:
                 gvf_operating = gvf_input
             else:
-                sol_ratio = gas_solubility_volumetric(gas_medium, p_op, temperature)
-                gvf_operating = (sol_ratio / (1 + sol_ratio)) * 100  # Umrechnung auf Prozent
-        
+                # sol_ratio ist cm³/L (Ihr Rückgabewert)
+                sol_cm3_L = gas_solubility_volumetric(gas_medium, p_op, temperature)
+                sol_L_L = sol_cm3_L / 1000.0 # Jetzt in L Gas / L Flüssigkeit
+                gvf_operating = (sol_L_L / (1 + sol_L_L)) * 100 # Umrechnung auf Prozent
+                
             if gvf_operating > selected_pump["GVF_max"] * 100:
                 st.warning(f"⚠️ GVF {gvf_operating:.1f}% überschreitet Pumpengrenze ({selected_pump['GVF_max']*100:.0f}%)")
             else:
