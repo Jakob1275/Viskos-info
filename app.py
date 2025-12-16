@@ -401,6 +401,7 @@ if st.session_state.page == "pump":
     B = {B:.2f}
             """
         )
+        st.markdown(f"""
         ### 3️⃣ Korrekturfaktoren bestimmen
         - **CH** (Förderhöhe): {CH:.3f}
         - **Cη** (Wirkungsgrad): {Ceta:.3f}
