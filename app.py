@@ -378,29 +378,29 @@ if st.session_state.page == "pump":
         
         ### 2️⃣ B-Zahl berechnen
     
-            **Klassische dimensionslose spezifische Drehzahl (B):**
-            """)
+        **Klassische dimensionslose spezifische Drehzahl (B):**
+        """)
 
-            # 2. LaTeX-Aufruf für die klassische Formel (MUSS SEPARAT SEIN)
-            st.latex(r"""
-                B = \frac{n \cdot \sqrt{Q}}{(g \cdot H)^{0.75}}
-            """)
+        # 2. LaTeX-Aufruf für die klassische Formel (MUSS SEPARAT SEIN)
+        st.latex(r"""
+            B = \frac{n \cdot \sqrt{Q}}{(g \cdot H)^{0.75}}
+        """)
 
-            # 3. Kleiner Markdown für die Überschrift der zweiten Formel
-            st.markdown(r"**Verwendete Kennzahl (B-Zahl) für diese Anwendung:**")
+        # 3. Kleiner Markdown für die Überschrift der zweiten Formel
+        st.markdown(r"**Verwendete Kennzahl (B-Zahl) für diese Anwendung:**")
     
-            # 4. LaTeX-Aufruf für die anwendungsspezifische Formel (MUSS SEPARAT SEIN)
-            st.latex(r"""
-                B_{\text{Code}} = \frac{16.5 \cdot \sqrt{\nu}}{Q^{0.25} \cdot H^{0.375}} 
-            """)
+        # 4. LaTeX-Aufruf für die anwendungsspezifische Formel (MUSS SEPARAT SEIN)
+        st.latex(r"""
+            B_{\text{Code}} = \frac{16.5 \cdot \sqrt{\nu}}{Q^{0.25} \cdot H^{0.375}} 
+        """)
             
-            # 5. Code-Block für die Implementierung (MUSS SEPARAT SEIN)
-            st.code(
-                f"""
-        B = 16.5 * nu**0.5 / (Q**0.25 * H**0.375)
-        B = {B:.2f}
-                """
-            )
+        # 5. Code-Block für die Implementierung (MUSS SEPARAT SEIN)
+        st.code(
+            f"""
+    B = 16.5 * nu**0.5 / (Q**0.25 * H**0.375)
+    B = {B:.2f}
+            """
+        )
         ### 3️⃣ Korrekturfaktoren bestimmen
         - **CH** (Förderhöhe): {CH:.3f}
         - **Cη** (Wirkungsgrad): {Ceta:.3f}
