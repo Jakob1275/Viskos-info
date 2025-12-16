@@ -33,14 +33,49 @@ MEDIA = {
 
 MPH_PUMPS = [
     {"id": "MPH-100", "type": "Mehrphase", "Q_max_m3h": 100,
-     "p_max_bar": 40, "GVF_max": 0.95, "Q_base": [0, 20, 40, 60, 80, 100],
-     "H_base": [35, 34, 32, 28, 22, 15], "eta_base": [0.45, 0.62, 0.70, 0.68, 0.60, 0.50]},
+     "p_max_bar": 40, "GVF_max": 0.95, 
+     "Q_base": [0, 20, 40, 60, 80, 100],
+     "H_base": [35, 34, 32, 28, 22, 15], 
+     "eta_base": [0.45, 0.62, 0.70, 0.68, 0.60, 0.50],
+     
+     # NEU: Simulierte Mehrphasen-Kennlinien (Druck vs. simulierte Leistung/Förderhöhe)
+     "MPH_Curves": {
+         # GVF 5% (Geringes Derating, hohe Leistung)
+         "GVF_5_Percent": {"p": [0, 5, 8, 11, 13], "H_sim": [0, 110, 95, 75, 55]},
+         # GVF 15% (Mittleres Derating)
+         "GVF_15_Percent": {"p": [0, 5, 8, 11, 13], "H_sim": [0, 90, 75, 50, 30]},
+         # GVF 25% (Starkes Derating, nahe der Grenze)
+         "GVF_25_Percent": {"p": [0, 5, 8, 11, 13], "H_sim": [0, 70, 50, 30, 10]},
+     }
+    },
+    
     {"id": "MPH-200", "type": "Mehrphase", "Q_max_m3h": 200,
-     "p_max_bar": 30, "GVF_max": 0.85, "Q_base": [0, 40, 80, 120, 160, 200],
-     "H_base": [28, 27, 25, 22, 17, 10], "eta_base": [0.40, 0.58, 0.68, 0.66, 0.58, 0.48]},
+     "p_max_bar": 30, "GVF_max": 0.85, 
+     "Q_base": [0, 40, 80, 120, 160, 200],
+     "H_base": [28, 27, 25, 22, 17, 10], 
+     "eta_base": [0.40, 0.58, 0.68, 0.66, 0.58, 0.48],
+     
+     # NEU: Simulierte Mehrphasen-Kennlinien
+     "MPH_Curves": {
+         "GVF_5_Percent": {"p": [0, 4, 7, 10, 12], "H_sim": [0, 95, 80, 60, 40]},
+         "GVF_15_Percent": {"p": [0, 4, 7, 10, 12], "H_sim": [0, 80, 65, 40, 20]},
+         "GVF_25_Percent": {"p": [0, 4, 7, 10, 12], "H_sim": [0, 60, 40, 20, 5]},
+     }
+    },
+    
     {"id": "MPH-50", "type": "Mehrphase", "Q_max_m3h": 50,
-     "p_max_bar": 50, "GVF_max": 0.90, "Q_base": [0, 10, 20, 30, 40, 50],
-     "H_base": [45, 44, 41, 36, 28, 18], "eta_base": [0.42, 0.60, 0.68, 0.66, 0.58, 0.48]},
+     "p_max_bar": 50, "GVF_max": 0.90, 
+     "Q_base": [0, 10, 20, 30, 40, 50],
+     "H_base": [45, 44, 41, 36, 28, 18], 
+     "eta_base": [0.42, 0.60, 0.68, 0.66, 0.58, 0.48],
+     
+     # NEU: Simulierte Mehrphasen-Kennlinien
+     "MPH_Curves": {
+         "GVF_5_Percent": {"p": [0, 6, 10, 14, 16], "H_sim": [0, 120, 105, 85, 60]},
+         "GVF_15_Percent": {"p": [0, 6, 10, 14, 16], "H_sim": [0, 100, 80, 55, 30]},
+         "GVF_25_Percent": {"p": [0, 6, 10, 14, 16], "H_sim": [0, 80, 55, 30, 10]},
+     }
+    },
 ]
 
 HENRY_CONSTANTS = {
@@ -395,7 +430,26 @@ elif st.session_state.page == "mph":
                label=f"{selected_pump['id']} GVF-Grenze ({gvf_max_pump_frac*100:.0f}%)", 
                alpha=0.8, zorder=4)
     # ----------------------------------------------------------------------
-
+    # KENNLINIEN DER MEHRPHASENPUMPE (GVF-Abhängigkeit)
+    # ----------------------------------------------------------------------
+    if "MPH_Curves" in selected_pump:
+        mph_colors = {"GVF_0_Percent": 'black', "GVF_10_Percent": 'red', "GVF_20_Percent": 'purple'}
+    
+        # Filtern der GVF-Kurven, die wir zeichnen wollen
+        curves_to_plot = ["GVF_0_Percent", "GVF_10_Percent", "GVF_20_Percent"]
+    
+        for curve_key in curves_to_plot:
+            if curve_key in selected_pump["MPH_Curves"]:
+                curve_data = selected_pump["MPH_Curves"][curve_key]
+            
+                # H_sim (simulierte Förderhöhe/Leistung) gegen Druck plotten
+                gvf_label = curve_key.replace("GVF_", "").replace("_Percent", "% GVF")
+            
+                ax.plot(curve_data["p"], curve_data["H_sim"], 
+                        marker='s', linestyle='-', linewidth=2, 
+                        color=mph_colors.get(curve_key, 'gray'), 
+                        label=f"{selected_pump['id']} ({gvf_label})",
+                        zorder=5)
 
     # GVF-Eingabe in die Einheit cm³/L umrechnen (um auf der Grafik darzustellen)
     if use_gvf and gvf_input is not None:
