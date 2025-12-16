@@ -79,9 +79,8 @@ MPH_PUMPS = [
 ]
 
 # ---------------------------
-# ATEX-Datenbank (aus Dokument)
+# ATEX-Datenbank
 # ---------------------------
-# Verfügbare Motortypen laut 
 ATEX_MOTORS = [
     {
         "id": "Standard Zone 2 (ec)",
@@ -89,15 +88,17 @@ ATEX_MOTORS = [
         "zone_suitable": [2],
         "temp_class": "T3",
         "t_max_surface": 200.0,
-        "category": "3G"
+        "category": "3G",
+        "description": "Standardlösung für Zone 2. Wirtschaftlichste Option. Wählbar, wenn T3 (200°C) für das Gas ausreicht und die Medientemperatur < 185°C ist."
     },
     {
         "id": "Zone 1 (eb)", 
-        "marking": "II 2G Ex eb IIC T3 Gb", # Hinweis: Source [cite: 21] sagt Gc, aber 2G ist typisch Gb. Ich nutze hier Gb für Zone 1 Sicherheit.
+        "marking": "II 2G Ex eb IIC T3 Gb", 
         "zone_suitable": [1, 2],
         "temp_class": "T3",
         "t_max_surface": 200.0,
-        "category": "2G"
+        "category": "2G",
+        "description": "Standardlösung für Zone 1 ('Erhöhte Sicherheit'). Wählbar, wenn T3 ausreichend ist. Leichter und günstiger als druckfeste Kapselung."
     },
     {
         "id": "Zone 1 (db eb) T4",
@@ -105,7 +106,8 @@ ATEX_MOTORS = [
         "zone_suitable": [1, 2],
         "temp_class": "T4",
         "t_max_surface": 135.0,
-        "category": "2G"
+        "category": "2G",
+        "description": "Für Zone 1 mit strengeren Temperaturanforderungen (T4). Kombination: Motor druckfest (db), Anschlusskasten erhöhte Sicherheit (eb) für einfachere Installation."
     },
     {
         "id": "Zone 1 (db) T4",
@@ -113,7 +115,8 @@ ATEX_MOTORS = [
         "zone_suitable": [1, 2],
         "temp_class": "T4",
         "t_max_surface": 135.0,
-        "category": "2G"
+        "category": "2G",
+        "description": "Für Zone 1 (T4). Vollständig druckfeste Kapselung inkl. Anschlusskasten. Robusteste Ausführung für raue Umgebungen."
     }
 ]
 
@@ -732,17 +735,31 @@ elif st.session_state.page == "atex":
                                      format_func=lambda x: f"{x['marking']} ({x['id']})")
                 
                 if selection:
+                    # --- HIER IST DER NEUE TEIL FÜR DIE ERKLÄRUNG ---
+                    st.info(f"ℹ️ **Warum dieser Motor?**\n\n{selection['description']}")
+                    
                     st.success("✅ **Gültige Konfiguration gefunden**")
                     
-                    st.info(f"""
-                    **Spezifikation:**
-                    * **Motor:** {P_iec} kW
-                    * **Kennzeichnung:** {selection['marking']}
-                    * **Zone:** {zone_select}
-                    * **T-Klasse:** {selection['temp_class']} (Max. Oberfläche {selection['t_max_surface']}°C)
-                    """)
-                    
-                    st.caption(f"Bezeichnungsschema nach[cite: 24]: Pumpe + {selection['marking']}")
+                    # Detail-Ausgabe
+                    with st.expander("Technische Details anzeigen", expanded=True):
+                        st.markdown(f"""
+                        **Spezifikation:**
+                        * **Leistung:** {P_iec:.2f} kW (inkl. Reserve)
+                        * **Kennzeichnung:** `{selection['marking']}`
+                        * **Zündschutzart:** {selection['id']}
+                        * **Max. Oberfläche:** {selection['t_max_surface']}°C ({selection['temp_class']})
+                        """)
+                        
+                        # Prüfung der 15K Regel visuell darstellen
+                        delta_t = selection['t_max_surface'] - T_medium
+                        if delta_t >= 15.0:
+                             st.caption(f"✅ Temperaturabstand: {delta_t:.1f} K (Vorschrift: min. 15 K)")
+                        else:
+                             # Dies sollte durch den Filter oben eigentlich nicht passieren, 
+                             # aber als Fallback zur Sicherheit:
+                             st.error(f"❌ Temperaturabstand zu gering: {delta_t:.1f} K")
+
+                    st.caption(f"Bestellbezeichnung: Pumpe + {selection['marking']}")
 
     # Info-Expander mit Zonen-Definitionen
     with st.expander("ℹ️ Definition der Ex-Zonen [cite: 4]"):
