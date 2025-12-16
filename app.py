@@ -433,24 +433,31 @@ elif st.session_state.page == "mph":
     # KENNLINIEN DER MEHRPHASENPUMPE (GVF-Abhängigkeit)
     # ----------------------------------------------------------------------
     if "MPH_Curves" in selected_pump:
-        mph_colors = {"GVF_0_Percent": 'black', "GVF_10_Percent": 'red', "GVF_20_Percent": 'purple'}
+        # Definieren Sie Farben für die Kennlinien
+        mph_colors = {"GVF_5_Percent": 'black', 
+                      "GVF_15_Percent": 'darkblue', 
+                      "GVF_25_Percent": 'red'}
     
-        # Filtern der GVF-Kurven, die wir zeichnen wollen
-        curves_to_plot = ["GVF_0_Percent", "GVF_10_Percent", "GVF_20_Percent"]
+        # Welche Kurven gezeichnet werden sollen
+        curves_to_plot = ["GVF_5_Percent", "GVF_15_Percent", "GVF_25_Percent"]
     
         for curve_key in curves_to_plot:
             if curve_key in selected_pump["MPH_Curves"]:
                 curve_data = selected_pump["MPH_Curves"][curve_key]
             
-                # H_sim (simulierte Förderhöhe/Leistung) gegen Druck plotten
-                gvf_label = curve_key.replace("GVF_", "").replace("_Percent", "% GVF")
-            
-                ax.plot(curve_data["p"], curve_data["H_sim"], 
-                        marker='s', linestyle='-', linewidth=2, 
-                        color=mph_colors.get(curve_key, 'gray'), 
-                        label=f"{selected_pump['id']} ({gvf_label})",
-                        zorder=5)
-
+                # Überprüfen Sie, ob 'p' und 'H_sim' Listen sind
+                if curve_data and "p" in curve_data and "H_sim" in curve_data:
+                
+                    # Der GVF-Label
+                    gvf_label = curve_key.replace("GVF_", "").replace("_Percent", "% GVF")
+                
+                    # Zeichnen der Kurve (Druck gegen simulierte Förderhöhe/Leistung)
+                    ax.plot(curve_data["p"], curve_data["H_sim"], 
+                            marker='o', linestyle='-', linewidth=2, 
+                            color=mph_colors.get(curve_key, 'gray'), 
+                            label=f"{selected_pump['id']} ({gvf_label})",
+                            zorder=5)
+                
     # GVF-Eingabe in die Einheit cm³/L umrechnen (um auf der Grafik darzustellen)
     if use_gvf and gvf_input is not None:
         gvf_frac = gvf_input / 100.0 # GVF in Fraktion (z.B. 0.10)
