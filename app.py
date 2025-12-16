@@ -1,6 +1,7 @@
 import math
 import streamlit as st
 import matplotlib.pyplot as plt
+import numpy as np
 from iapws import IAPWS97
 
 G = 9.80665  # m/s²
