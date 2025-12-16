@@ -31,22 +31,23 @@ MEDIA = {
 }
 
 MPH_PUMPS = [
-    {"id": "MPH-100 (Twin-Screw)", "type": "Schraubenspindel", "Q_max_m3h": 100,
+    {"id": "MPH-100", "type": "Mehrphase", "Q_max_m3h": 100,
      "p_max_bar": 40, "GVF_max": 0.95, "Q_base": [0, 20, 40, 60, 80, 100],
      "H_base": [35, 34, 32, 28, 22, 15], "eta_base": [0.45, 0.62, 0.70, 0.68, 0.60, 0.50]},
-    {"id": "MPH-200 (Helico-Axial)", "type": "Heliko-axial", "Q_max_m3h": 200,
+    {"id": "MPH-200", "type": "Mehrphase", "Q_max_m3h": 200,
      "p_max_bar": 30, "GVF_max": 0.85, "Q_base": [0, 40, 80, 120, 160, 200],
      "H_base": [28, 27, 25, 22, 17, 10], "eta_base": [0.40, 0.58, 0.68, 0.66, 0.58, 0.48]},
-    {"id": "MPH-50 (Compact)", "type": "Schraubenspindel", "Q_max_m3h": 50,
+    {"id": "MPH-50", "type": "Mehrphase", "Q_max_m3h": 50,
      "p_max_bar": 50, "GVF_max": 0.90, "Q_base": [0, 10, 20, 30, 40, 50],
      "H_base": [45, 44, 41, 36, 28, 18], "eta_base": [0.42, 0.60, 0.68, 0.66, 0.58, 0.48]},
 ]
 
-HENRY_CONSTANTS = {"CO2": 29.4, "O2": 769.2, "N2": 1639.3, "CH4": 714.3, "H2": 1282.1, "H2S": 10.3}
-HENRY_TEMP_PARAMS = {
-    "CO2": {"A": 29.4, "B": 2400}, "O2": {"A": 769.2, "B": 1500},
-    "N2": {"A": 1639.3, "B": 1300}, "CH4": {"A": 714.3, "B": 1600},
-    "H2": {"A": 1282.1, "B": 500}, "H2S": {"A": 10.3, "B": 2100},
+HENRY_CONSTANTS = {
+    "Luft": {"A": 1300, "B": 1500},
+    "CO2": {"A": 29.4, "B": 2400},
+    "O2": {"A": 769.2, "B": 1500},
+    "N2": {"A": 1639.3, "B": 1300},
+    "CH4": {"A": 714.3, "B": 1600},
 }
 
 # Helper Functions
@@ -123,68 +124,42 @@ def choose_best_pump(pumps, Q_water, H_water, allow_out_of_range=True):
             best = cand
     return best
 
-# Sättigung
-def sat_temperature_from_pressure(p_bar_abs):
-    w = IAPWS97(P=p_bar_abs * 0.1, x=0)
-    return w.T - 273.15
-
-def sat_pressure_from_temperature(t_c):
-    w = IAPWS97(T=t_c + 273.15, x=0)
-    return w.P * 10.0
-
-def saturation_curve_pT(T_min=0.0, T_max=350.0, n=200):
-    Ts = [T_min + (T_max - T_min) * i / (n - 1) for i in range(n)]
-    ps = []
-    for T in Ts:
-        try: ps.append(sat_pressure_from_temperature(T))
-        except: ps.append(float("nan"))
-    return Ts, ps
-
-# Henry's Law
 def henry_constant(gas, T_celsius):
-    params = HENRY_TEMP_PARAMS.get(gas)
-    if not params: return HENRY_CONSTANTS.get(gas, 1000.0)
+    """Temperaturabhängige Henry-Konstante"""
+    params = HENRY_CONSTANTS.get(gas, {"A": 1000, "B": 1500})
     T_K, T0_K = T_celsius + 273.15, 298.15
     return params["A"] * math.exp(params["B"] * (1/T_K - 1/T0_K))
 
-def gas_solubility_henry(gas, p_partial_bar, T_celsius):
-    return p_partial_bar / henry_constant(gas, T_celsius)
+def gas_solubility_volumetric(gas, p_bar, T_celsius):
+    """
+    Löslichkeit als Gasvolumen pro Flüssigkeitsvolumen [L/L]
+    Vereinfachte Berechnung: V_gas/V_liquid = p / H(T) * 22.4
+    """
+    H = henry_constant(gas, T_celsius)
+    # Konzentration in mol/L, dann umrechnen auf L/L
+    C_mol_L = p_bar / H
+    V_ratio = C_mol_L * 22.4  # 1 mol Gas = 22.4 L bei STP
+    return V_ratio
 
-def max_dissolved_gas_content(gas, p_total_bar, T_celsius, gas_fraction=1.0):
-    p_partial = p_total_bar * gas_fraction
-    C_mol_L = gas_solubility_henry(gas, p_partial, T_celsius)
-    V_gas_L_per_L = C_mol_L * 22.4
-    GVF = V_gas_L_per_L / (1.0 + V_gas_L_per_L)
-    return {"concentration_mol_L": C_mol_L, "volume_ratio": V_gas_L_per_L,
-            "GVF_at_degassing": GVF, "partial_pressure_bar": p_partial}
+def solubility_curve_vs_pressure(gas, T_celsius, p_max=14):
+    """Löslichkeitskurve: Gasvolumen/Flüssigkeitsvolumen vs. Druck"""
+    pressures = np.linspace(0, p_max, 100)
+    solubilities = [gas_solubility_volumetric(gas, p, T_celsius) * 100 for p in pressures]  # in Prozent
+    return pressures, solubilities
 
-def solubility_curve(gas, T_celsius, p_range=(0.1, 20.0), n=100):
-    ps = [p_range[0] + (p_range[1] - p_range[0]) * i / (n - 1) for i in range(n)]
-    Cs = [gas_solubility_henry(gas, p, T_celsius) for p in ps]
-    return ps, Cs
-
-# Gas-Derating
-def gas_derating_factor_H(gvf): return clamp(1.0 - 1.4 * (clamp(gvf, 0, 0.6) ** 0.85), 0.2, 1.0)
-def gas_derating_factor_eta(gvf): return clamp(1.0 - 2.0 * (clamp(gvf, 0, 0.6) ** 0.9), 0.1, 1.0)
-
-def apply_gas_derating_curve(Q, H, eta, gvf):
-    fH, feta = gas_derating_factor_H(gvf), gas_derating_factor_eta(gvf)
-    return Q, [h * fH for h in H], [max(1e-6, e * feta) for e in eta]
-
-def choose_mph_pump(Q_req, p_req, GVF_req):
-    H_req = p_req * 10.197
-    candidates = []
-    for pump in MPH_PUMPS:
-        if Q_req > pump["Q_max_m3h"] or GVF_req > pump["GVF_max"]: continue
-        H_at_Q = interp_clamped(Q_req, pump["Q_base"], pump["H_base"])
-        if H_at_Q >= H_req * 0.8:
-            score = abs(H_at_Q - H_req) + abs(Q_req - pump["Q_max_m3h"]/2) * 0.1
-            candidates.append({"pump": pump, "H_at_Q": H_at_Q, "score": score})
-    return min(candidates, key=lambda x: x["score"]) if candidates else None
+def mph_derating_curve(pump, gvf_percent):
+    """
+    Vereinfachte Kennlinien-Derating bei Gasanteil
+    Annahme: Q bleibt gleich, H sinkt mit GVF
+    """
+    gvf = gvf_percent / 100.0
+    # Einfaches Derating-Modell
+    derating_factor = max(0.2, 1.0 - 1.5 * gvf)
+    return derating_factor
 
 # Streamlit App
 st.set_page_config(page_title="Pumpenauslegung", layout="wide")
-st.title("🔧 Pumpenauslegungstool")
+st.title("Pumpenauslegungstool")
 
 if "page" not in st.session_state:
     st.session_state.page = "pump"
@@ -353,134 +328,160 @@ if st.session_state.page == "pump":
 # PAGE 2: SÄTTIGUNG
 # =========================================================
 elif st.session_state.page == "mph":
-    st.subheader("💧 Sättigungsanalyse (Mehrphasen)")
+    st.subheader("Mehrphasen-Pumpenauswahl")
     
     with st.sidebar:
+        st.header("⚙️ Eingaben")
+    
+        # Gasmedium
+        gas_medium = st.selectbox("Gasmedium", list(HENRY_CONSTANTS.keys()), index=0)
+    
+        # Mehrphasenpumpe
+        pump_id = st.selectbox("Mehrphasenpumpe", [p["id"] for p in MPH_PUMPS], index=0)
+        selected_pump = next(p for p in MPH_PUMPS if p["id"] == pump_id)
+    
+        # Temperatur
+        temperature = st.number_input("Temperatur [°C]", -10.0, 100.0, 20.0, 1.0)
+    
         st.divider()
-        st.subheader("⚙️ Eingaben")
-
-        gas = st.selectbox("Gasmedium", list(HENRY_CONSTANTS.keys()), index=0)
-
-        pump_id = st.selectbox(
-            "Mehrphasenpumpe",
-            [p["id"] for p in MPH_PUMPS],
-            index=0
-        )
-        pump = next(p for p in MPH_PUMPS if p["id"] == pump_id)
-
-        T_c = st.number_input("Temperatur T [°C]", min_value=-10.0, max_value=200.0, value=20.0, step=1.0)
-        p_abs = st.number_input("Druck p_abs [bar]", min_value=0.1, max_value=200.0, value=5.0, step=0.1)
-
-        gvf = st.slider("Gasanteil GVF [-]", 0.0, 0.95, 0.10, 0.01)
-        Q_req = st.number_input("Betriebspunkt Q [m³/h]", min_value=0.1, max_value=float(pump["Q_max_m3h"]), value=min(40.0, float(pump["Q_max_m3h"])), step=1.0)
-
-        gas_fraction = st.slider("Molenbruch Gas im Gasgemisch [-]", 0.0, 1.0, 1.0, 0.05)
-
-    # 1) Henry: maximal gelöstes Gas
-    sat = max_dissolved_gas_content(gas, p_abs, T_c, gas_fraction=gas_fraction)
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Henry-Löslichkeit C", f"{sat['concentration_mol_L']:.4f} mol/L")
-    col2.metric("Gasvolumen @Arbeitspunkt", f"{sat['volume_ratio']:.3f} V_Gas/L")
-    col3.metric("Gasvolumenanteil bei Ausgasung", f"{sat['GVF_at_degassing']:.3f}")
-
-    st.caption(f"Partialdruck: {sat['partial_pressure_bar']:.2f} bar | Henry H(T): {henry_constant(gas, T_c):.1f} bar·L/mol")
-
-    st.divider()
     
-    # 3) MPH-Kennlinie und Gas-Derating
-    H_req = p_abs * 10.197  # grob bar->mWS
-
-    H0 = interp_clamped(Q_req, pump["Q_base"], pump["H_base"])
-    eta0 = interp_clamped(Q_req, pump["Q_base"], pump["eta_base"])
-
-    Qg, Hg, etag = apply_gas_derating_curve(pump["Q_base"], pump["H_base"], pump["eta_base"], gvf)
-
-    H_g = interp_clamped(Q_req, Qg, Hg)
-    eta_g = interp_clamped(Q_req, Qg, etag)
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("H_benötigt (≈)", f"{H_req:.1f} m")
-    col2.metric("H_Wasser @Q", f"{H0:.1f} m")
-    col3.metric("H_Gas @Q", f"{H_g:.1f} m")
-    col4.metric("η_Gas @Q", f"{eta_g:.3f}")
-
-    st.divider()
+        # Optionale Eingaben
+        st.subheader("Optional")
     
-    # 2) Löslichkeitskurve C(p)
-    ps, Cs = solubility_curve(gas, T_c, p_range=(0.1, max(20.0, p_abs*1.2)), n=120)
+        use_gvf = st.checkbox("Gasanteil vorgeben", value=False)
+        if use_gvf:
+            gvf_input = st.slider("Gasanteil [%]", 0, 95, 10, 1)
+        else:
+            gvf_input = None
+    
+        use_op_point = st.checkbox("Betriebspunkt vorgeben", value=True)
+        if use_op_point:
+            Q_op = st.number_input("Volumenstrom Q [m³/h]", 1.0, float(selected_pump["Q_max_m3h"]), 50.0, 5.0)
+            p_op = st.number_input("Druck p [bar]", 0.1, float(selected_pump["p_max_bar"]), 5.0, 0.5)
+        else:
+            Q_op = None
+            p_op = None
 
-    fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(ps, Cs, marker=None)
-    ax.scatter([p_abs], [sat["concentration_mol_L"]], s=80)
-    ax.set_xlabel("Druck p_abs [bar]")
-    ax.set_ylabel("Löslichkeit C [mol/L]")
-    ax.set_title(f"Löslichkeitskurve nach Henry (Gas: {gas}, T={T_c:.1f}°C)")
-    ax.grid(True, alpha=0.3)
+    # Hauptbereich
+    st.markdown("### 📊 Löslichkeit und Mehrphasen-Kennlinien")
+
+    # Löslichkeitskurven bei verschiedenen Temperaturen
+    temp_variants = [temperature - 10, temperature, temperature + 10]
+    temp_variants = [t for t in temp_variants if -10 <= t <= 100]
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Löslichkeitskurven (gestrichelt)
+    colors_temp = ['blue', 'darkblue', 'lightblue']
+    for i, T in enumerate(temp_variants):
+        pressures, solubilities = solubility_curve_vs_pressure(gas_medium, T, p_max=14)
+        label = f"Löslichkeit {gas_medium} {T:.0f}°C"
+        ax.plot(pressures, solubilities, '--', linewidth=2, color=colors_temp[i], label=label)
+
+    # Kennlinien bei verschiedenen Gasanteilen (durchgezogen)
+    gvf_variants = [10, 15, 20]
+    colors_gvf = ['lightcoral', 'red', 'darkred']
+
+    # Dummy-Kennlinien (in Realität aus Herstellerdaten)
+    # Annahme: Bei höherem GVF sinkt die Löslichkeit effektiv (weniger freies Volumen)
+    for i, gvf in enumerate(gvf_variants):
+        pressures = np.linspace(0, 14, 100)
+        # Vereinfachte "Kennlinie" mit GVF: Löslichkeit wird reduziert
+        base_sol = [gas_solubility_volumetric(gas_medium, p, temperature) * 100 for p in pressures]
+        # Mit GVF: effektive Kapazität sinkt
+        modified_sol = [s * (1 - gvf/100) for s in base_sol]
+        ax.plot(pressures, modified_sol, '-', linewidth=2.5, color=colors_gvf[i], label=f"{gvf}% Luft")
+
+    # Betriebspunkt markieren
+    if use_op_point and Q_op and p_op:
+        # Berechne Löslichkeit am Betriebspunkt
+        sol_at_op = gas_solubility_volumetric(gas_medium, p_op, temperature) * 100
+        ax.scatter([p_op], [sol_at_op], s=200, marker='o', color='red', 
+                   edgecolors='black', linewidths=2, zorder=5, label='Betriebspunkt')
+    
+        # Maximale Löslichkeit bei diesem Druck
+        st.markdown("### ✅ **Betriebspunkt Maximaler Löslichkeit**")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("**Druck**", f"**{p_op:.2f} bar**")
+        col2.metric("**Temperatur**", f"**{temperature:.1f} °C**")
+        col3.metric("**Max. Löslichkeit**", f"**{sol_at_op:.1f} L/L**")
+        col4.metric("**Max. Löslichkeit**", f"**{sol_at_op/(1+sol_at_op/100)*100:.1f} % GVF**")
+
+    ax.set_xlabel("Druck [bar]", fontsize=13, fontweight='bold')
+    ax.set_ylabel("Löslichkeit [cm³/l] / Gasvolumenstrom [l/min]", fontsize=13, fontweight='bold')
+    ax.set_title("Gaslöslichkeit und Mehrphasen-Kennlinien", fontsize=15, fontweight='bold')
+    ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
+    ax.set_xlim(0, 14)
+    ax.set_ylim(0, 180)
+
     st.pyplot(fig, clear_figure=True)
 
+    # Pumpenspezifikation
     st.divider()
+    st.markdown("### 🔧 Ausgewählte Pumpe")
 
-   
-    # Plot Q-H base vs gas
-    fig2, ax2 = plt.subplots(figsize=(9, 5))
-    ax2.plot(pump["Q_base"], pump["H_base"], linewidth=2, label="MPH Basis")
-    ax2.plot(Qg, Hg, linewidth=2, linestyle="--", label=f"MPH mit Gas (GVF={gvf:.2f})")
-    ax2.scatter([Q_req], [H_req], s=90, marker="^", label="Betriebspunkt (Anforderung)")
-    ax2.scatter([Q_req], [H_g], s=90, marker="x", label="Betriebspunkt (Gas-derated)")
-    ax2.set_xlabel("Volumenstrom Q [m³/h]")
-    ax2.set_ylabel("Förderhöhe H [m]")
-    ax2.set_title("Gaskennlinie aus MPH-Kennlinie (Derating)")
-    ax2.grid(True, alpha=0.3)
-    ax2.legend()
-    st.pyplot(fig2, clear_figure=True)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Pumpe", selected_pump["id"])
+    col2.metric("Typ", selected_pump["type"])
+    col3.metric("Max. GVF", f"{selected_pump['GVF_max']*100:.0f}%")
+    col4.metric("Max. Druck", f"{selected_pump['p_max_bar']:.0f} bar")
 
-    # ---------------------------
-    # Rechenweg Mehrphasen
-    # ---------------------------
-    with st.expander("📘 Rechenweg & Gas-Derating Theorie", expanded=False):
-        fH = gas_derating_factor_H(gvf)
-        feta = gas_derating_factor_eta(gvf)
-
-        st.markdown(f"""
-        ## Gas-Derating (Vereinfachtes Modell) 
-
-        Dieses Modell simuliert die Reduktion von Förderhöhe (H) und Wirkungsgrad (η) einer Kreiselpumpe bei der Förderung eines Mediums mit einem **Gasvolumenanteil (GVF)**.
-
-        ### 1️⃣ Gegeben
-        - Erforderlicher Volumenstrom Q: **{Q_req:.2f} m³/h**
-        - Gasvolumenanteil (Input) GVF: **{gvf:.3f}**
-        - Gewählte Pumpe (Basis, Flüssig): **{pump["id"]}**
-
-        ### 2️⃣ Basiswerte (Flüssig-Kennlinie)
-        - H₀ (Basis-Förderhöhe bei Q): **{H0:.2f} m**
-        - η₀ (Basis-Wirkungsgrad bei Q): **{eta0:.3f}**
-
-        ### 3️⃣ Derating-Faktoren berechnen
-        Die Derating-Faktoren $F_H$ und $F_{{\\eta}}$ werden basierend auf dem GVF berechnet (hier nach empirischen Formeln, z.B. Samoilov-Ansatz):
-        
-        * **Förderhöhen-Faktor ($F_H$):**
-            $$F_H = 1.0 - 1.4 \\cdot (\\text{{GVF}}^{{0.85}}) = {fH:.3f}$$
-            Derating: **{(1-fH)*100:.1f} %**
-
-        * **Wirkungsgrad-Faktor ($F_{{\\eta}}$):**
-            $$F_{{\\eta}} = 1.0 - 2.0 \\cdot (\\text{{GVF}}^{{0.9}}) = {feta:.3f}$$
-            Derating: **{(1-feta)*100:.1f} %**
-        
-        ### 4️⃣ Berechneter Betriebspunkt (mit Gas)
-        Der Volumenstrom $$Q$$ wird nicht korrigiert, da die Pumpe das **Gesamtvolumen** fördert. Nur $$H$$ (Förderhöhe) und $$\\eta$$ (Wirkungsgrad) werden korrigiert:
-        
-        ```
-        Q_Gas = Q_req = {Q_req:.2f} m³/h
-        H_Gas = H₀ × F_H = {H0:.2f} × {fH:.3f} = {H_g:.2f} m
-        η_Gas = η₀ × F_η = {eta0:.3f} × {feta:.3f} = {eta_g:.3f}
-        ```
-        ---
-        ## 📚 Henry's Law (Gelöstes Gas)
-        
-        Der im oberen Bereich berechnete gelöste Gasgehalt zeigt, wie viel Gas bei **{p_abs:.1f} bar** und **{T_c:.1f}°C** maximal im Medium gelöst sein kann (relevant für die Risikoabschätzung):
-        
-        - Löslichkeit C: **{sat['concentration_mol_L']:.4f} mol/L**
-        - Maximaler GVF bei vollständiger Ausgasung: **{sat['GVF_at_degassing']:.3f}**
-        """)
+    # Bewertung
+    if use_op_point and Q_op and p_op:
+        st.markdown("### 📋 Bewertung")
     
+        # Prüfe ob Betriebspunkt in Pumpenbereich liegt
+        if Q_op > selected_pump["Q_max_m3h"]:
+            st.error(f"❌ Volumenstrom {Q_op:.1f} m³/h überschreitet Maximum ({selected_pump['Q_max_m3h']:.0f} m³/h)")
+        elif p_op > selected_pump["p_max_bar"]:
+            st.error(f"❌ Druck {p_op:.1f} bar überschreitet Maximum ({selected_pump['p_max_bar']:.0f} bar)")
+        else:
+            # Berechne GVF aus Löslichkeit oder nutze Vorgabe
+            if gvf_input:
+                gvf_operating = gvf_input
+            else:
+                sol_ratio = gas_solubility_volumetric(gas_medium, p_op, temperature)
+                gvf_operating = (sol_ratio / (1 + sol_ratio)) * 100  # Umrechnung auf Prozent
+        
+            if gvf_operating > selected_pump["GVF_max"] * 100:
+                st.warning(f"⚠️ GVF {gvf_operating:.1f}% überschreitet Pumpengrenze ({selected_pump['GVF_max']*100:.0f}%)")
+            else:
+                st.success(f"✅ Betriebspunkt liegt im Pumpenbereich (GVF: {gvf_operating:.1f}%)")
+            
+                # Derating berechnen
+                derating = mph_derating_curve(selected_pump, gvf_operating)
+                st.info(f"ℹ️ Derating-Faktor bei {gvf_operating:.1f}% GVF: {derating:.2f} (ca. {(1-derating)*100:.0f}% Leistungsreduktion)")
+
+    # Erklärung
+    with st.expander("📘 Erläuterung der Grafik", expanded=False):
+        st.markdown("""
+        ### Löslichkeitskurven (gestrichelt)
+    
+        Die **gestrichelten Linien** zeigen die maximale Gaslöslichkeit nach Henry's Law bei verschiedenen Temperaturen:
+        - Je höher der Druck, desto mehr Gas kann gelöst werden
+        - Je höher die Temperatur, desto weniger Gas kann gelöst werden
+    
+        ### Mehrphasen-Kennlinien (durchgezogen)
+    
+        Die **durchgezogenen Linien** zeigen die effektive Gasaufnahme bei verschiedenen Gasanteilen (GVF):
+        - Bei höherem vorhandenem Gasanteil sinkt die Kapazität zur Gasaufnahme
+        - Die Kennlinien berücksichtigen, dass bereits vorhandenes Gas Volumen belegt
+    
+        ### Betriebspunkt Maximaler Löslichkeit
+    
+        Der **rote Punkt** markiert den Betriebspunkt:
+        - Bei diesem Druck und dieser Temperatur kann maximal die angezeigte Gasmenge gelöst werden
+        - Überschreitet der tatsächliche Gasanteil diesen Wert, liegt freies Gas (Blasen) vor
+        - Die Pumpe muss dann für Mehrphasenbetrieb ausgelegt sein
+    
+        ### Interpretation
+    
+        - **Links von den Kennlinien**: Einphasiger Betrieb möglich (Gas vollständig gelöst)
+        - **Rechts von den Kennlinien**: Zweiphasiger Betrieb (freies Gas vorhanden)
+        - Die Wahl der Mehrphasenpumpe hängt vom erwarteten GVF ab
+        """)
+
+    # Footer
+    st.divider()
+    st.caption("⚗️ Mehrphasen-Pumpenauswahl v1.0 | Vereinfachtes Modell - für Engineering immer Herstellerdaten verwenden!")
