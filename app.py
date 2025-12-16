@@ -377,10 +377,57 @@ if st.session_state.page == "pump":
         - ρ = {rho:.1f} kg/m³
         
         ### 2️⃣ B-Zahl berechnen
-        ```
-        B = 16.5 × ν^0.5 / (Q^0.25 × H^0.375)
-        B = {B:.2f}
-        ```
+        
+        # Die Formel für die B-Zahl (dimensionslose spezifische Drehzahl) lautet:
+        # $$ B = \frac{n_s}{100} = \frac{n \cdot Q^{0.5}}{H^{0.75} \cdot g^{0.75}} $$
+        # Wobei n_s die spezifische Drehzahl (dimensionslos) ist.
+        # Im US/Imperial-System wird oft eine andere, vereinfachte Formel verwendet,
+        # die zur Dimensionsanalyse dient und in der Pumpenliteratur üblich ist.
+        
+        # Die von Ihnen genannte Formel ist eine vereinfachte Darstellung der 
+        # spezifischen Drehzahl (ns, oder hier B) für eine metrische Einheit mit n=2900 1/min
+        # oder in Bezug auf die spezifische Drehzahl (ns) nach API Standard 610.
+
+        st.markdown(r"Die verwendete dimensionslose Kennzahl (B-Zahl) lautet:")
+        st.latex(r"""
+            B = \frac{n \cdot \sqrt{Q}}{(g \cdot H)^{0.75}}
+        """)
+        
+        # Im Kontext Ihrer Anwendung (einfache Kennzahlen):
+        # Wenn Sie die genannte Formel verwenden möchten, muss der Code wie folgt aussehen:
+        
+        st.markdown(r"Alternativ, die vereinfachte B-Zahl nach metrischen Einheiten:")
+        st.latex(r"""
+            B_{\text{simplified}} = \frac{16.5 \cdot \sqrt{\nu}}{Q^{0.25} \cdot H^{0.375}}
+        """)
+        
+        # Beispielhafte Berechnung (wie von Ihnen gewünscht, ohne ν):
+        
+        # Annahme: Sie meinten die Formel zur Berechnung der spezifischen Drehzahl (Ns)
+        # B = Ns * (Q^0.5) / (H^0.75) * 100
+        
+        # WICHTIG: Die von Ihnen genannte Formel (16.5 * ν^0.5 / (Q^0.25 * H^0.375)) 
+        #          ist nicht die klassische B-Zahl, sondern eine spezifische Kennzahl
+        #          mit dimensionsbehafteten Koeffizienten und einem unbekannten ν.
+        
+        # Da Sie die Ausgabe der Formel wünschen:
+        st.markdown(r"**Verwendete Näherungsformel der B-Zahl im Code:**")
+        st.latex(r"""
+            B_{\text{Code}} = \frac{16.5 \cdot \sqrt{\nu}}{Q^{0.25} \cdot H^{0.375}} 
+        """)
+        
+        # Hier folgt die eigentliche Berechnung, wenn ν (kin. Viskosität) definiert ist
+        
+        # Beispiel: B = 16.5 * nu**0.5 / (Q_op**0.25 * H_op**0.375)
+        
+        # Wobei H = H_op und Q = Q_op
+        
+        st.code(
+            f"""
+            B = 16.5 \\times \\nu^{{0.5}} / (Q^{{0.25}} \\times H^{{0.375}})
+            B = {{B:.2f}} 
+            """
+        )
         
         ### 3️⃣ Korrekturfaktoren bestimmen
         - **CH** (Förderhöhe): {CH:.3f}
