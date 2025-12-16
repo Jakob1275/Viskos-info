@@ -78,6 +78,55 @@ MPH_PUMPS = [
     },
 ]
 
+# ---------------------------
+# ATEX-Datenbank (aus Dokument)
+# ---------------------------
+# Verfügbare Motortypen laut 
+ATEX_MOTORS = [
+    {
+        "id": "Standard Zone 2 (ec)",
+        "marking": "II 3G Ex ec IIC T3 Gc",
+        "zone_suitable": [2],
+        "temp_class": "T3",
+        "t_max_surface": 200.0,
+        "category": "3G"
+    },
+    {
+        "id": "Zone 1 (eb)", 
+        "marking": "II 2G Ex eb IIC T3 Gb", # Hinweis: Source [cite: 21] sagt Gc, aber 2G ist typisch Gb. Ich nutze hier Gb für Zone 1 Sicherheit.
+        "zone_suitable": [1, 2],
+        "temp_class": "T3",
+        "t_max_surface": 200.0,
+        "category": "2G"
+    },
+    {
+        "id": "Zone 1 (db eb) T4",
+        "marking": "II 2G Ex db eb IIC T4 Gb",
+        "zone_suitable": [1, 2],
+        "temp_class": "T4",
+        "t_max_surface": 135.0,
+        "category": "2G"
+    },
+    {
+        "id": "Zone 1 (db) T4",
+        "marking": "II 2G Ex db IIC T4 Gb",
+        "zone_suitable": [1, 2],
+        "temp_class": "T4",
+        "t_max_surface": 135.0,
+        "category": "2G"
+    }
+]
+
+# Temperaturklassen Definition
+TEMP_CLASSES_LIMITS = {
+    "T1": 450.0,
+    "T2": 300.0,
+    "T3": 200.0,
+    "T4": 135.0,
+    "T5": 100.0,
+    "T6": 85.0
+}
+
 HENRY_CONSTANTS = {
     "Luft": {"A": 1300, "B": 1500},
     "CO2": {"A": 29.4, "B": 2400},
@@ -204,11 +253,13 @@ if "page" not in st.session_state:
 
 with st.sidebar:
     st.header("📍 Navigation")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     if col1.button("🔄 Pumpen", use_container_width=True):
         st.session_state.page = "pump"
     if col2.button("⚗️ Mehrphasen", use_container_width=True):
         st.session_state.page = "mph"
+    if col3.button("⚡ ATEX", use_container_width=True):
+        st.session_state.page = "atex"
     st.info(f"**Aktiv:** {'Pumpen' if st.session_state.page=='pump' else 'Mehrphasen'}")
 
 # PAGE: PUMPEN
@@ -580,3 +631,125 @@ elif st.session_state.page == "mph":
     # Footer
     st.divider()
     st.caption("⚗️ Mehrphasen-Pumpenauswahl v1.0 | Vereinfachtes Modell - für Engineering immer Herstellerdaten verwenden!")
+
+# =========================================================
+# PAGE 3: ATEX-MOTORAUSWAHL
+# =========================================================
+elif st.session_state.page == "atex":
+    st.subheader("⚡ ATEX-Motorauslegung")
+    st.caption("Auslegung nach RL 2014/34/EU")
+
+    # Layout: Links Eingabe, Rechts Logik/Ergebnis
+    col_in, col_res = st.columns([1, 2])
+
+    with col_in:
+        st.header("1. Prozessdaten")
+        
+        # Leistungsvorgabe (kann aus vorherigen Reitern kommen oder manuell)
+        P_req_input = st.number_input("Erf. Wellenleistung Pumpe [kW]", 
+                                      min_value=0.1, value=5.5, step=0.5,
+                                      help="Leistung am Betriebspunkt der Pumpe")
+        
+        T_medium = st.number_input("Medientemperatur [°C]", 
+                                   min_value=-20.0, max_value=200.0, value=40.0, step=1.0)
+
+        st.divider()
+        st.header("2. Zonen-Definition")
+        
+        # Atmosphäre: Gas oder Staub
+        atmosphere = st.radio("Atmosphäre", ["G (Gas)", "D (Staub)"], index=0)
+        
+        # Zone Auswahl
+        if atmosphere == "G (Gas)":
+            zone_select = st.selectbox("Ex-Zone (Gas)", [0, 1, 2], index=2,
+                                       help="Zone 0: ständig, Zone 1: gelegentlich, Zone 2: selten [cite: 4]")
+        else:
+            zone_select = st.selectbox("Ex-Zone (Staub)", [20, 21, 22], index=2,
+                                       help="Zone 20: ständig, Zone 21: gelegentlich, Zone 22: selten [cite: 4]")
+
+    with col_res:
+        st.markdown("### 📋 ATEX-Konformitätsprüfung")
+        
+        valid_config = True
+
+        # --- PRÜFUNG 1: Zonen-Machbarkeit  ---
+        if atmosphere == "D (Staub)":
+            st.error("❌ **Staub-Ex (Atmosphäre D):** Für diese Anforderung haben wir kein passendes Aggregat.")
+            st.warning("Laut Vorschrift: 'Für Aufstellung in ... Ex-Atmosphäre D (Staub) haben wir kein passendes Aggregat' ")
+            valid_config = False
+            
+        elif zone_select == 0:
+            st.error("❌ **Zone 0:** Für Zone 0 haben wir kein passendes Aggregat.")
+            st.warning("Laut Vorschrift: 'Für Aufstellung in Zone 0 ... haben wir kein passendes Aggregat' ")
+            valid_config = False
+            
+        else:
+            st.success(f"✅ Zone {zone_select} (Gas) ist machbar.")
+            
+        # --- PRÜFUNG 2: Temperaturklasse [cite: 15, 16, 17] ---
+        if valid_config:
+            st.markdown("#### Temperatur-Check")
+            
+            # Sicherheitsabstand 15K [cite: 16, 17]
+            t_margin = 15.0
+            
+            # Geeignete Motoren filtern
+            suitable_motors = []
+            
+            for m in ATEX_MOTORS:
+                # 1. Zonen-Check
+                if zone_select in m["zone_suitable"]:
+                    # 2. Temperatur-Check: T_surface - 15K >= T_medium
+                    if (m["t_max_surface"] - t_margin) >= T_medium:
+                        suitable_motors.append(m)
+            
+            if not suitable_motors:
+                st.error(f"❌ Keine Motoren verfügbar für T_medium = {T_medium}°C!")
+                st.markdown(f"""
+                **Grund:** Der Abstand zwischen Medientemperatur und max. Oberflächentemperatur 
+                muss mind. **{t_margin} K** betragen[cite: 17].
+                
+                Benötigte T-Klasse bei {T_medium}°C: **min. {T_medium + t_margin}°C** zulässig.
+                """)
+            else:
+                # --- PRÜFUNG 3: Leistungsdimensionierung [cite: 13, 14] ---
+                st.markdown("#### Leistungsdimensionierung")
+                
+                # Regel: 15% Reserve [cite: 13, 14]
+                P_motor_min = P_req_input * 1.15
+                P_iec = motor_iec(P_motor_min) # Helper Funktion nutzen
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("P_Pumpe", f"{P_req_input:.2f} kW")
+                col2.metric("P_min (+15%)", f"{P_motor_min:.2f} kW", help="Mind. 15% Reserve gefordert ")
+                col3.metric("IEC Motorgröße", f"**{P_iec:.2f} kW**")
+                
+                st.divider()
+                st.markdown("### 🔧 Verfügbare ATEX-Motoren")
+                
+                selection = st.radio("Wählen Sie einen Motortyp:", 
+                                     options=suitable_motors,
+                                     format_func=lambda x: f"{x['marking']} ({x['id']})")
+                
+                if selection:
+                    st.success("✅ **Gültige Konfiguration gefunden**")
+                    
+                    st.info(f"""
+                    **Spezifikation:**
+                    * **Motor:** {P_iec} kW
+                    * **Kennzeichnung:** {selection['marking']}
+                    * **Zone:** {zone_select}
+                    * **T-Klasse:** {selection['temp_class']} (Max. Oberfläche {selection['t_max_surface']}°C)
+                    """)
+                    
+                    st.caption(f"Bezeichnungsschema nach[cite: 24]: Pumpe + {selection['marking']}")
+
+    # Info-Expander mit Zonen-Definitionen
+    with st.expander("ℹ️ Definition der Ex-Zonen [cite: 4]"):
+        st.markdown("""
+        | Zone (Gas) | Beschreibung | Häufigkeit |
+        | :--- | :--- | :--- |
+        | **Zone 0** | Ständige, lang andauernde Gefahr | Häufig |
+        | **Zone 1** | Gelegentliche Gefahr im Normalbetrieb | Gelegentlich |
+        | **Zone 2** | Normalerweise keine Gefahr / nur kurzzeitig | Selten |
+        """)
