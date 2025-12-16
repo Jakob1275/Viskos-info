@@ -395,7 +395,20 @@ elif st.session_state.page == "mph":
         modified_sol = [s * (1 - gvf/100) for s in base_sol]
         ax.plot(pressures, modified_sol, '-', linewidth=2.5, color=colors_gvf[i], label=f"{gvf}% Luft")
 
-# Betriebspunkt markieren
+    # GVF-Eingabe in die Einheit cm³/L umrechnen (um auf der Grafik darzustellen)
+    if use_gvf and gvf_input is not None:
+        gvf_frac = gvf_input / 100.0 # GVF in Fraktion (z.B. 0.10)
+    
+        # Umrechnung: GVF = L_L_L / (1 + L_L_L)  ->  L_L_L = GVF / (1 - GVF)
+        sol_L_L_req = gvf_frac / (1.0 - gvf_frac) 
+        sol_cm3_L_req = sol_L_L_req * 1000.0 # Löslichkeit in cm³/L
+
+        # Zeichne eine Linie, die den angeforderten Gasanteil bei allen Drücken darstellt
+        # (Dies ist eine Annahme: Der Gasanteil ist unabhängig vom Druck, wenn er vorgegeben ist)
+        ax.axhline(sol_cm3_L_req, color='green', linestyle=':', linewidth=2, 
+                   label=f"Angeforderter GVF ({gvf_input:.0f}%)")
+    
+    # Betriebspunkt markieren
     if use_op_point and Q_op and p_op:
         
         # 1. Berechnung der Löslichkeit am Betriebspunkt (Korrektur der Skalierung)
