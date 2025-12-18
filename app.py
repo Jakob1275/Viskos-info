@@ -486,6 +486,19 @@ elif st.session_state.page == "mph":
             gvf_input = st.slider("Gasanteil [%]", 0, 40, 10, 1)
         else:
             gvf_input = None
+
+        Q_max = float(selected_pump["Q_max_m3h"])
+        if "Q_op" not in st.session_state or st.session_state.Q_op > Q_max:
+        st.session_state.Q_op = min(50.0, Q_max)
+
+        Q_op = st.number_input(
+            "Volumenstrom Q [m³/h]",
+            min_value=1.0,
+            max_value=Q_max,
+            value=float(st.session_state.Q_op),
+            step=5.0,
+            key="Q_op"
+        )
     
         use_op_point = st.checkbox("Betriebspunkt vorgeben", value=True)
         if use_op_point:
