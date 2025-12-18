@@ -679,7 +679,7 @@ elif st.session_state.page == "mph":
         #else:
             # Berechne GVF aus Löslichkeit oder nutze Vorgabe
           #  if gvf_input:
-                gvf_operating = gvf_input
+              #  gvf_operating = gvf_input
            # else:
                 # sol_ratio ist cm³/L (Ihr Rückgabewert)
                # sol_cm3_L = gas_solubility_volumetric(gas_medium, p_op, temperature)
