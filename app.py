@@ -226,7 +226,35 @@ def choose_best_pump(pumps, Q_water, H_water, allow_out_of_range=True):
             best = cand
     return best
     
-import math
+def pressure_required_from_gvf(gas: str, T_celsius: float, gvf_percent: float) -> float:
+    """
+    Druck p [bar], der nötig wäre, um einen vorgegebenen freien Gasanteil (GVF) vollständig zu lösen
+    (Henry-basiert, Gasvolumen auf STP bezogen wie in gas_solubility_volumetric()).
+
+    GVF-Definition: GVF = V_gas / (V_gas + V_liquid)
+
+    Rückgabe: p_req [bar]
+    """
+    gvf = max(0.0, min(0.99, gvf_percent / 100.0))  # nie 1.0 -> Division durch 0 vermeiden
+    if gvf <= 0.0:
+        return 0.0
+
+    # Gasvolumen pro 1 L Flüssigkeit aus GVF:
+    # Verhältnis Vgas/Vliq = gvf/(1-gvf)  [L Gas / L Flüssigkeit]
+    Vgas_per_Lliq_L = gvf / (1.0 - gvf)
+
+    # Umrechnung in cm³/L (weil gas_solubility_volumetric cm³/L liefert)
+    Vgas_per_Lliq_cm3 = Vgas_per_Lliq_L * 1000.0  # 1 L = 1000 cm³
+
+    # in mol/L umrechnen (STP-Annahme wie bei dir: 1 mol = 22400 cm³)
+    C_mol_L = Vgas_per_Lliq_cm3 / 22400.0
+
+    # Henry: C = p / H  => p = C * H(T)
+    H = henry_constant(gas, T_celsius)  # [bar·L/mol] bei dir
+    p_req_bar = C_mol_L * H
+
+    return float(p_req_bar)
+
 
 def parse_gvf_key(key: str) -> float:
     # "GVF_5_Percent" -> 5.0
