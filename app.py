@@ -226,47 +226,16 @@ def choose_best_pump(pumps, Q_water, H_water, allow_out_of_range=True):
             best = cand
     return best
     
-def henry_constant(gas, T_celsius):
-    """Temperaturabhängige Henry-Konstante"""
-    params = HENRY_CONSTANTS.get(gas, {"A": 1000, "B": 1500})
-    T_K, T0_K = T_celsius + 273.15, 298.15
-    return params["A"] * math.exp(params["B"] * (1/T_K - 1/T0_K))
-
-def gas_solubility_volumetric(gas, p_bar, T_celsius):
-    """
-    Löslichkeit in cm³ Gas pro Liter Flüssigkeit [cm³/L]
-    Nach Henry's Law: C = p / H(T)
-    Umrechnung: mol/L -> cm³/L mit idealem Gasgesetz
-    """
-    H = henry_constant(gas, T_celsius)
-    C_mol_L = p_bar / H
-    V_cm3_per_L = C_mol_L * 22400  # 1 mol Gas = 22400 cm³ bei STP
-    return V_cm3_per_L
-
-def solubility_curve_vs_pressure(gas, T_celsius, p_max=14):
-    """Löslichkeitskurve: Gasvolumen [cm³/L] vs. Druck [bar]"""
-    pressures = np.linspace(0, p_max, 100)
-    solubilities = [gas_solubility_volumetric(gas, p, T_celsius) for p in pressures]
-    return pressures, solubilities
-
-def mph_derating_curve(pump, gvf_percent):
-    """Vereinfachte Kennlinien-Derating bei Gasanteil"""
-    gvf = gvf_percent / 100.0
-    derating_factor = max(0.2, 1.0 - 1.5 * gvf)
-    return derating_factor
-
-def gvf_from_solubility_cm3L(sol_cm3_L):
-    # sol_cm3_L -> L/L
-    sol_L_L = sol_cm3_L / 1000.0
-    return sol_L_L / (1.0 + sol_L_L)  # fraction
+import math
 
 def parse_gvf_key(key: str) -> float:
-    # z.B. "GVF_15_Percent" -> 15.0
-    m = re.search(r"(\d+)", key)
-    return float(m.group(1)) if m else float("nan")
+    # "GVF_5_Percent" -> 5.0
+    try:
+        return float(key.split("_")[1])
+    except Exception:
+        return float("nan")
 
 def interp_clamped(x, xs, ys):
-    xs = list(xs); ys = list(ys)
     if len(xs) < 2:
         return ys[0]
     if x <= xs[0]:
@@ -277,82 +246,76 @@ def interp_clamped(x, xs, ys):
         if x <= xs[i]:
             x0, y0 = xs[i-1], ys[i-1]
             x1, y1 = xs[i], ys[i]
+            if x1 == x0:
+                return y1
             return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
     return ys[-1]
 
-def m3h_to_lmin(q_m3h: float) -> float:
-    return q_m3h * 1000.0 / 60.0
-
-def lmin_to_m3h(q_lmin: float) -> float:
-    return q_lmin * 60.0 / 1000.0
-
-def gvf_to_cm3_per_L(gvf_percent: float) -> float:
+def choose_best_mph_pump(
+    mph_pumps,
+    Q_req_m3h: float,
+    p_sys_req_bar: float,
+    gvf_req_percent: float,
+    preferred_gvf_percent: float | None = None,
+    safety_margin_bar: float = 0.2,
+):
     """
-    Umrechnung GVF (%) -> Gasvolumen je Liter Flüssigkeit [cm³/L]
-    Annahme: GVF bezieht sich auf Volumenanteile (Gas/(Gas+Flüssig)) am Einlass.
-    Für 1 L Flüssigkeit: V_gas = gvf/(1-gvf) [L Gas / L Flüssigkeit]
-    """
-    gvf = max(0.0, min(0.95, gvf_percent / 100.0))
-    if gvf >= 0.999:
-        return float("inf")
-    vgas_L_per_Lliq = gvf / (1.0 - gvf)
-    return vgas_L_per_Lliq * 1000.0  # L/L -> cm³/L
-
-def pressure_required_from_gvf(gas: str, T_c: float, gvf_percent: float) -> float:
-    """
-    Invertiertes Henry: gesuchter Druck, bei dem diese Gasmenge (GVF) maximal löslich wäre.
-    V_cm3/L -> mol/L -> p = C*H(T)
-    """
-    V_cm3_L = gvf_to_cm3_per_L(gvf_percent)
-    C_mol_L = V_cm3_L / 22400.0  # mol/L bei STP
-    H = henry_constant(gas, T_c) # bar·L/mol
-    p_bar = C_mol_L * H
-    return max(0.0, p_bar)
-
-def choose_best_mph_pump(MPH_PUMPS, p_req_bar, Q_req_m3h, preferred_gvf=None):
-    """
-    Wählt automatisch die beste Pumpe + GVF-Kennlinie:
-    - Muss Q_req bei p_req liefern (interpoliert)
-    - Minimiert Überdeckung (Q_cap - Q_req) und p-Margin
+    Wählt automatisch beste Pumpe + nächstliegende GVF-Kurve.
+    Annahme: MPH_Curves enthalten p(Q) (oder H(Q) -> dann vorher umrechnen).
+    
+    Kriterien:
+    - Q_req <= Q_max, gvf_req <= GVF_max
+    - p_available(Q_req) >= p_sys_req + safety_margin
+    - Score: möglichst kleiner Druck-Überhang + Nähe zur preferred_gvf
     """
     best = None
-    for pump in MPH_PUMPS:
+
+    for pump in mph_pumps:
+        if Q_req_m3h > float(pump["Q_max_m3h"]):
+            continue
+        if gvf_req_percent > float(pump["GVF_max"]) * 100.0:
+            continue
+
         curves = pump.get("MPH_Curves", {})
         for key, curve in curves.items():
             gvf_curve = parse_gvf_key(key)
 
-            # optional: wenn du eine "Betriebs-GVF" hast, bevorzugen wir die nächstliegende Kennlinie
+            # curve muss Q und p haben (wie Herstellerplot)
+            # -> falls du aktuell p/H_sim hast, musst du das Datenformat anpassen
+            Qs = curve.get("Q")
+            ps = curve.get("p")
+            if not Qs or not ps:
+                continue
+
+            p_available = interp_clamped(Q_req_m3h, Qs, ps)
+
+            if p_available + 1e-9 < (p_sys_req_bar + safety_margin_bar):
+                continue
+
+            # weiche Präferenz: nimm die Kurve, die der erwarteten GVF am nächsten ist
             gvf_penalty = 0.0
-            if preferred_gvf is not None and not math.isnan(gvf_curve):
-                gvf_penalty = abs(gvf_curve - preferred_gvf) * 0.2  # weich gewichtet
+            target_gvf = preferred_gvf_percent if preferred_gvf_percent is not None else gvf_req_percent
+            if not math.isnan(gvf_curve):
+                gvf_penalty = abs(gvf_curve - target_gvf) * 0.2
 
-            ps = curve["p"]
-            qs_m3h = curve["H_sim"]  # Annahme: das ist Q in m³/h (wie Hersteller-Plot)
-            q_cap = interp_clamped(p_req_bar, ps, qs_m3h)
+            # Score: knapp passend ist gut
+            p_over = p_available - p_sys_req_bar
+            score = p_over * 5.0 + gvf_penalty
 
-            # harte Ausschlüsse
-           if gvf_req > pump["GVF_max"]:
-                continue
+            cand = {
+                "pump": pump,
+                "pump_id": pump["id"],
+                "curve_key": key,
+                "gvf_curve": gvf_curve,
+                "p_available": p_available,
+                "score": score,
+            }
 
-            if Q_req > pump["Q_max_m3h"]:
-                continue
-
-            H_available = interp_curve(pump_curve, Q_req)
-
-            if H_available < H_min_threshold:
-                continue
-
-            # muss schaffen
-            if q_cap + 1e-9 < Q_req_m3h:
-                continue
-
-            # Score: möglichst knapp passend
-            score = (q_cap - Q_req_m3h) * 5.0 + abs(float(pump["p_max_bar"]) - p_req_bar) * 0.05 + gvf_penalty
-
-            cand = {"pump": pump, "curve_key": key, "gvf_curve": gvf_curve, "q_cap": q_cap, "score": score}
             if best is None or cand["score"] < best["score"]:
                 best = cand
+
     return best
+
 
 
 # Streamlit App
