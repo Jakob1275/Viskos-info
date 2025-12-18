@@ -32,49 +32,68 @@ MEDIA = {
 }
 
 MPH_PUMPS = [
-    {"id": "MPH-100", "type": "Mehrphase", "Q_max_m3h": 100,
-     "p_max_bar": 40, "GVF_max": 0.95, 
-     "Q_base": [0, 20, 40, 60, 80, 100],
-     "H_base": [35, 34, 32, 28, 22, 15], 
-     "eta_base": [0.45, 0.62, 0.70, 0.68, 0.60, 0.50],
-     
-     # NEU: Simulierte Mehrphasen-Kennlinien (Druck vs. simulierte Leistung/Förderhöhe)
-     "MPH_Curves": {
-         # GVF 5% (Geringes Derating, hohe Leistung)
-         "GVF_5_Percent": {"p": [0, 5, 8, 11, 13], "H_sim": [0, 110, 95, 75, 55]},
-         # GVF 15% (Mittleres Derating)
-         "GVF_15_Percent": {"p": [0, 5, 8, 11, 13], "H_sim": [0, 90, 75, 50, 30]},
-         # GVF 25% (Starkes Derating, nahe der Grenze)
-         "GVF_25_Percent": {"p": [0, 5, 8, 11, 13], "H_sim": [0, 70, 50, 30, 10]},
-     }
+    {
+        "id": "MPH-100",
+        "type": "Schraubenspindel",
+        "Q_max_m3h": 100,
+        "p_max_bar": 40,
+        "GVF_max": 0.95,
+        "MPH_Curves": {
+            "GVF_5_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 20, 40, 60, 70, 75, 70, 60]
+            },
+            "GVF_15_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 18, 38, 58, 65, 68, 60, 45]
+            },
+            "GVF_25_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 15, 32, 50, 55, 50, 35, 15]
+            }
+        }
     },
-    
-    {"id": "MPH-200", "type": "Mehrphase", "Q_max_m3h": 200,
-     "p_max_bar": 30, "GVF_max": 0.85, 
-     "Q_base": [0, 40, 80, 120, 160, 200],
-     "H_base": [28, 27, 25, 22, 17, 10], 
-     "eta_base": [0.40, 0.58, 0.68, 0.66, 0.58, 0.48],
-     
-     # NEU: Simulierte Mehrphasen-Kennlinien
-     "MPH_Curves": {
-         "GVF_5_Percent": {"p": [0, 4, 7, 10, 12], "H_sim": [0, 95, 80, 60, 40]},
-         "GVF_15_Percent": {"p": [0, 4, 7, 10, 12], "H_sim": [0, 80, 65, 40, 20]},
-         "GVF_25_Percent": {"p": [0, 4, 7, 10, 12], "H_sim": [0, 60, 40, 20, 5]},
-     }
+    {
+        "id": "MPH-200",
+        "type": "Heliko-axial",
+        "Q_max_m3h": 200,
+        "p_max_bar": 30,
+        "GVF_max": 0.85,
+        "MPH_Curves": {
+            "GVF_5_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 22, 45, 65, 75, 80, 75, 65]
+            },
+            "GVF_15_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 20, 42, 62, 70, 73, 65, 50]
+            },
+            "GVF_25_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 17, 35, 52, 58, 55, 40, 20]
+            }
+        }
     },
-    
-    {"id": "MPH-50", "type": "Mehrphase", "Q_max_m3h": 50,
-     "p_max_bar": 50, "GVF_max": 0.90, 
-     "Q_base": [0, 10, 20, 30, 40, 50],
-     "H_base": [45, 44, 41, 36, 28, 18], 
-     "eta_base": [0.42, 0.60, 0.68, 0.66, 0.58, 0.48],
-     
-     # NEU: Simulierte Mehrphasen-Kennlinien
-     "MPH_Curves": {
-         "GVF_5_Percent": {"p": [0, 6, 10, 14, 16], "H_sim": [0, 120, 105, 85, 60]},
-         "GVF_15_Percent": {"p": [0, 6, 10, 14, 16], "H_sim": [0, 100, 80, 55, 30]},
-         "GVF_25_Percent": {"p": [0, 6, 10, 14, 16], "H_sim": [0, 80, 55, 30, 10]},
-     }
+    {
+        "id": "MPH-50",
+        "type": "Schraubenspindel",
+        "Q_max_m3h": 50,
+        "p_max_bar": 50,
+        "GVF_max": 0.90,
+        "MPH_Curves": {
+            "GVF_5_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 25, 50, 72, 85, 90, 85, 75]
+            },
+            "GVF_15_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 23, 48, 68, 78, 82, 75, 60]
+            },
+            "GVF_25_Percent": {
+                "p": [0, 2, 4, 6, 8, 10, 12, 14],
+                "H_sim": [0, 20, 40, 58, 65, 62, 48, 25]
+            }
+        }
     },
 ]
 
@@ -225,25 +244,19 @@ def gas_solubility_volumetric(gas, p_bar, T_celsius):
     Umrechnung: mol/L -> cm³/L mit idealem Gasgesetz
     """
     H = henry_constant(gas, T_celsius)
-    # Konzentration in mol/L
     C_mol_L = p_bar / H
-    # Umrechnung auf cm³/L: 1 mol Gas = 22400 cm³ bei STP
-    V_cm3_per_L = C_mol_L * 22400
+    V_cm3_per_L = C_mol_L * 22400  # 1 mol Gas = 22400 cm³ bei STP
     return V_cm3_per_L
 
 def solubility_curve_vs_pressure(gas, T_celsius, p_max=14):
     """Löslichkeitskurve: Gasvolumen [cm³/L] vs. Druck [bar]"""
-    pressures = np.linspace(0, p_max, 100)
+    pressures = linspace(0, p_max, 100)
     solubilities = [gas_solubility_volumetric(gas, p, T_celsius) for p in pressures]
     return pressures, solubilities
 
 def mph_derating_curve(pump, gvf_percent):
-    """
-    Vereinfachte Kennlinien-Derating bei Gasanteil
-    Annahme: Q bleibt gleich, H sinkt mit GVF
-    """
+    """Vereinfachte Kennlinien-Derating bei Gasanteil"""
     gvf = gvf_percent / 100.0
-    # Einfaches Derating-Modell
     derating_factor = max(0.2, 1.0 - 1.5 * gvf)
     return derating_factor
 
@@ -462,14 +475,14 @@ elif st.session_state.page == "mph":
     
         use_gvf = st.checkbox("Gasanteil vorgeben", value=False)
         if use_gvf:
-            gvf_input = st.slider("Gasanteil [%]", 0, 95, 10, 1)
+            gvf_input = st.slider("Gasanteil [%]", 0, 40, 10, 1)
         else:
             gvf_input = None
     
         use_op_point = st.checkbox("Betriebspunkt vorgeben", value=True)
         if use_op_point:
             Q_op = st.number_input("Volumenstrom Q [m³/h]", 1.0, float(selected_pump["Q_max_m3h"]), 50.0, 5.0)
-            p_op = st.number_input("Druck p [bar]", 0.1, float(selected_pump["p_max_bar"]), 5.0, 0.5)
+            p_op = st.number_input("Druck p [bar]", 0.1, float(selected_pump["p_max_bar"]), 4.5, 0.5)
         else:
             Q_op = None
             p_op = None
@@ -496,7 +509,6 @@ elif st.session_state.page == "mph":
     gvf_max_pump_frac = selected_pump["GVF_max"]
 
     # Umrechnung der max. GVF der Pumpe in die Einheit der Y-Achse (cm³/L)
-    # L_L_L = GVF / (1 - GVF)
     sol_L_L_max_pump = gvf_max_pump_frac / (1.0 - gvf_max_pump_frac) 
     sol_cm3_L_max_pump = sol_L_L_max_pump * 1000.0 # Löslichkeit in cm³/L
 
@@ -512,7 +524,6 @@ elif st.session_state.page == "mph":
                       "GVF_15_Percent": 'darkblue', 
                       "GVF_25_Percent": 'red'}
     
-        # Welche Kurven gezeichnet werden sollen
         curves_to_plot = ["GVF_5_Percent", "GVF_15_Percent", "GVF_25_Percent"]
     
         for curve_key in curves_to_plot:
@@ -521,8 +532,6 @@ elif st.session_state.page == "mph":
             
                 # Überprüfen Sie, ob 'p' und 'H_sim' Listen sind
                 if curve_data and "p" in curve_data and "H_sim" in curve_data:
-                
-                    # Der GVF-Label
                     gvf_label = curve_key.replace("GVF_", "").replace("_Percent", "% GVF")
                 
                     # Zeichnen der Kurve (Druck gegen simulierte Förderhöhe/Leistung)
@@ -535,8 +544,6 @@ elif st.session_state.page == "mph":
     # GVF-Eingabe in die Einheit cm³/L umrechnen (um auf der Grafik darzustellen)
     if use_gvf and gvf_input is not None:
         gvf_frac = gvf_input / 100.0 # GVF in Fraktion (z.B. 0.10)
-    
-        # Umrechnung: L_L_L = GVF / (1 - GVF)
         sol_L_L_req = gvf_frac / (1.0 - gvf_frac) 
         sol_cm3_L_req = sol_L_L_req * 1000.0 # Löslichkeit in cm³/L
 
@@ -552,13 +559,12 @@ elif st.session_state.page == "mph":
     
         # Für den Plot: Wir plotten cm³/L 
         ax.scatter([p_op], [sol_cm3_L], s=200, marker='o', color='red', 
-                    edgecolors='black', linewidths=2, zorder=5, label='Betriebspunkt')
+                    edgecolors='black', linewidths=2, zorder=6, label='Betriebspunkt')
 
         # 2. Berechnung der Metriken (Korrektur der Umrechnung)
-    
         # Löslichkeit in L Gas / L Flüssigkeit
         sol_L_L = sol_cm3_L / 1000.0 
-    
+        
         # Maximaler Gasvolumenanteil (GVF) bei diesem Zustand:
         gvf_max_percent = (sol_L_L / (1.0 + sol_L_L)) * 100
 
@@ -566,17 +572,12 @@ elif st.session_state.page == "mph":
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("**Druck**", f"**{p_op:.2f} bar**")
         col2.metric("**Temperatur**", f"**{temperature:.1f} °C**")
-    
-        # Metrik 3: Löslichkeit in L/L (korrigierte Skalierung)
         col3.metric("**Max. Löslichkeit**", f"**{sol_L_L:.3f} L/L**") 
-    
-        # Metrik 4: Löslichkeit in % GVF (korrigierte Berechnung)
         col4.metric("**Max. Löslichkeit**", f"**{gvf_max_percent:.1f} % GVF**")
 
     ax.set_xlabel("Druck [bar]", fontsize=13, fontweight='bold')
-    # Achsenbeschriftung korrigiert, um l/min zu entfernen, da es nicht geplottet wird
-    ax.set_ylabel("Löslichkeit [cm³/l]", fontsize=13, fontweight='bold') 
-    ax.set_title("Gaslöslichkeit und Mehrphasen-Phasenanalyse", fontsize=15, fontweight='bold')
+    ax.set_ylabel("Löslichkeit [cm³/l] / Gasvolumenstrom [l/min]", fontsize=13, fontweight='bold') 
+    ax.set_title("Gaslöslichkeit und Mehrphasen-Kennlinien", fontsize=15, fontweight='bold')
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
     ax.set_xlim(0, 14)
@@ -623,37 +624,233 @@ elif st.session_state.page == "mph":
                 st.info(f"ℹ️ Derating-Faktor bei {gvf_operating:.1f}% GVF: {derating:.2f} (ca. {(1-derating)*100:.0f}% Leistungsreduktion)")
 
     # Erklärung
-    with st.expander("📘 Erläuterung der Grafik", expanded=False):
-        st.markdown("""
-        ### Löslichkeitskurven (gestrichelt)
-    
-        Die **gestrichelten Linien** zeigen die maximale Gaslöslichkeit nach Henry's Law bei verschiedenen Temperaturen:
-        - Je höher der Druck, desto mehr Gas kann gelöst werden
-        - Je höher die Temperatur, desto weniger Gas kann gelöst werden
-    
-        ### Mehrphasen-Kennlinien (durchgezogen)
-    
-        Die **durchgezogenen Linien** zeigen die effektive Gasaufnahme bei verschiedenen Gasanteilen (GVF):
-        - Bei höherem vorhandenem Gasanteil sinkt die Kapazität zur Gasaufnahme
-        - Die Kennlinien berücksichtigen, dass bereits vorhandenes Gas Volumen belegt
-    
-        ### Betriebspunkt Maximaler Löslichkeit
-    
-        Der **rote Punkt** markiert den Betriebspunkt:
-        - Bei diesem Druck und dieser Temperatur kann maximal die angezeigte Gasmenge gelöst werden
-        - Überschreitet der tatsächliche Gasanteil diesen Wert, liegt freies Gas (Blasen) vor
-        - Die Pumpe muss dann für Mehrphasenbetrieb ausgelegt sein
-    
-        ### Interpretation
-    
-        - **Links von den Kennlinien**: Einphasiger Betrieb möglich (Gas vollständig gelöst)
-        - **Rechts von den Kennlinien**: Zweiphasiger Betrieb (freies Gas vorhanden)
-        - Die Wahl der Mehrphasenpumpe hängt vom erwarteten GVF ab
-        """)
-
-    # Footer
-    st.divider()
-    st.caption("⚗️ Mehrphasen-Pumpenauswahl v1.0 | Vereinfachtes Modell - für Engineering immer Herstellerdaten verwenden!")
+    # Rechenweg und Theorie
+    with st.expander("📘 Rechenweg & Theorie: Mehrphasen-Auslegung", expanded=False):
+        # Berechnete Werte für Beispiel
+        if use_op_point and Q_op and p_op:
+            sol_calc = gas_solubility_volumetric(gas_medium, p_op, temperature)
+            sol_L_L_calc = sol_calc / 1000.0
+            gvf_calc = (sol_L_L_calc / (1.0 + sol_L_L_calc)) * 100
+            H_henry = henry_constant(gas_medium, temperature)
+        
+            st.markdown(f"""
+            ## Mehrphasen-Pumpenauslegung: Gaslöslichkeit und GVF
+        
+            ### 1️⃣ Gegeben (Betriebsbedingungen)
+            - Gas: **{gas_medium}**
+            - Druck: **p = {p_op:.2f} bar**
+            - Temperatur: **T = {temperature:.1f} °C**
+            - Volumenstrom: **Q = {Q_op:.1f} m³/h**
+            - Pumpe: **{selected_pump['id']}**
+        
+            ---
+        
+            ### 2️⃣ Henry's Law: Gaslöslichkeit berechnen
+        
+            **Grundprinzip:** Die Löslichkeit eines Gases in einer Flüssigkeit ist proportional zum Partialdruck.
+        
+            ```
+            C = p / H(T)
+            ```
+        
+            Wobei:
+            - **C** = Konzentration [mol/L]
+            - **p** = Partialdruck des Gases [bar]
+            - **H(T)** = Henry-Konstante (temperaturabhängig) [bar·L/mol]
+            
+            #### Schritt 2a: Henry-Konstante bei Betriebstemperatur
+        
+            Die Henry-Konstante ändert sich mit der Temperatur nach van't Hoff:
+        
+            ```
+            H(T) = H₀ × exp[B × (1/T - 1/T₀)]
+            ```
+        
+            Für **{gas_medium}** bei **T = {temperature:.1f}°C**:
+            ```
+            H({temperature:.1f}°C) = {H_henry:.1f} bar·L/mol
+            ```
+        
+            #### Schritt 2b: Konzentration berechnen
+        
+            ```
+            C = p / H(T) = {p_op:.2f} / {H_henry:.1f} = {(p_op/H_henry):.6f} mol/L
+            ```
+        
+            #### Schritt 2c: Umrechnung auf Volumenverhältnis
+        
+            Mit dem idealen Gasgesetz (1 mol Gas = 22.400 cm³ bei STP):
+        
+            ```
+            V_Gas/V_Flüssigkeit = C × 22.400 cm³/mol
+            V_Gas/V_Flüssigkeit = {(p_op/H_henry):.6f} × 22.400 = {sol_calc:.2f} cm³/L
+            ```
+        
+            Umrechnung auf L/L:
+            ```
+            V_Gas/V_Flüssigkeit = {sol_calc:.2f} cm³/L ÷ 1000 = {sol_L_L_calc:.3f} L/L
+            ```
+        
+            **Interpretation:** Pro Liter Flüssigkeit können maximal **{sol_L_L_calc:.3f} Liter** Gas gelöst werden.
+        
+            ---
+        
+            ### 3️⃣ Gas Volume Fraction (GVF) berechnen
+        
+            Der **GVF** beschreibt den Volumenanteil des Gases im Zweiphasengemisch:
+        
+            ```
+            GVF = V_Gas / (V_Gas + V_Flüssigkeit)
+            ```
+        
+            Bei **1 Liter Flüssigkeit** mit **{sol_L_L_calc:.3f} L** gelöstem Gas:
+        
+            ```
+            GVF = {sol_L_L_calc:.3f} / (1.0 + {sol_L_L_calc:.3f})
+            GVF = {sol_L_L_calc:.3f} / {(1.0 + sol_L_L_calc):.3f}
+            GVF = {(sol_L_L_calc / (1.0 + sol_L_L_calc)):.4f}
+            GVF = {gvf_calc:.2f}%
+            ```
+        
+            **Ergebnis:** Bei diesem Betriebspunkt beträgt der maximale Gasvolumenanteil **{gvf_calc:.2f}%**.
+        
+            ---
+        
+            ### 4️⃣ Pumpenauswahl und Bewertung
+        
+            #### Kriterium 1: GVF-Grenze der Pumpe
+        
+            Gewählte Pumpe: **{selected_pump['id']}**
+            - Max. GVF der Pumpe: **{selected_pump['GVF_max']*100:.0f}%**
+            - Berechneter GVF: **{gvf_calc:.2f}%**
+        
+            **Bewertung:**
+            {"✅ **GVF liegt innerhalb der Pumpengrenze** → Pumpe geeignet" if gvf_calc <= selected_pump['GVF_max']*100 else "❌ **GVF überschreitet Pumpengrenze** → Andere Pumpe wählen oder Betriebspunkt anpassen"}
+        
+            #### Kriterium 2: Betriebspunkt auf MPH-Kennlinie
+        
+            Die **Mehrphasen-Kennlinien** (durchgezogene Linien im Diagramm) zeigen die Leistungsfähigkeit der Pumpe bei verschiedenen GVF-Werten:
+        
+            - **5% GVF**: Pumpe arbeitet nahezu wie im Einphasenbetrieb
+            - **15% GVF**: Leistungsreduktion durch Gasanteil erkennbar
+            - **25% GVF**: Deutliche Leistungseinbuße
+        
+            **Ablesehinweis:** 
+            - Betriebspunkt (roter Punkt) sollte **unterhalb** oder **auf** der entsprechenden GVF-Kennlinie liegen
+            - Liegt er darüber → Risiko von Kavitation/Ausgasung
+        
+            #### Kriterium 3: Druck- und Volumenstrombereiche
+        
+            - Max. Druck der Pumpe: **{selected_pump['p_max_bar']:.0f} bar**
+            - Betriebsdruck: **{p_op:.2f} bar** {"✅" if p_op <= selected_pump['p_max_bar'] else "❌"}
+        
+            - Max. Volumenstrom: **{selected_pump['Q_max_m3h']:.0f} m³/h**
+            - Betriebsvolumenstrom: **{Q_op:.1f} m³/h** {"✅" if Q_op <= selected_pump['Q_max_m3h'] else "❌"}
+        
+            ---
+        
+            ### 5️⃣ Physikalische Zusammenhänge
+        
+            #### Warum steigen die Löslichkeitskurven?
+            
+            Nach Henry's Law ist die Löslichkeit **direkt proportional zum Druck**:
+            - Höherer Druck → Mehr Gasmoleküle werden in die Flüssigkeit "gedrückt"
+            - Niedrigerer Druck → Gas entweicht aus der Lösung (Ausgasung)
+        
+            #### Warum fallen die MPH-Kennlinien bei hohem Druck?
+        
+            Bei Mehrphasenpumpen:
+            1. **Niedriger Druck (links):** Gute Saugbedingungen, Pumpe arbeitet effizient
+            2. **Mittlerer Druck (Mitte):** Optimaler Arbeitsbereich
+            3. **Hoher Druck (rechts):** Kompression des Gases, erhöhter Leistungsbedarf, Effizienz sinkt
+        
+            **Wichtig:** Diese Kennlinien sind **volumenstromabhängig**! Bei höherem Q verschieben sich die Kurven.
+        
+            #### Temperatureinfluss
+        
+            Höhere Temperatur → **Niedrigere Löslichkeit**
+            - Die Henry-Konstante H(T) steigt mit der Temperatur
+            - Weniger Gas kann gelöst werden
+            - Höheres Ausgasungsrisiko
+        
+            ---
+        
+            ### 6️⃣ Praktische Auslegungsempfehlungen
+        
+            ✅ **Sicherheitsabstände einhalten:**
+            - GVF: Mind. **10-15%** unter Pumpengrenze betreiben
+            - Druck: Mind. **10%** Reserve zur max. Druckgrenze
+            - Berücksichtigung von Druckschwankungen im System
+        
+            ✅ **Kritische Betriebspunkte vermeiden:**
+            - Saugseite: Niedrige Drücke → Ausgasungsrisiko
+            - Hohe Temperaturen: Reduzierte Löslichkeit
+            - Teillastbetrieb: Kann zu instabilem Betrieb führen
+        
+            ✅ **Für Engineering-Auslegung:**
+            - Immer Herstellerdaten für spezifischen Volumenstrom verwenden
+            - MPH-Kennlinien vom Hersteller anfordern
+            - NPSH-Anforderungen bei Mehrphasenbetrieb prüfen
+            - Druckverluste in Rohrleitung berücksichtigen
+        
+            ---
+        
+            ### 📚 Normen und Standards
+        
+            - **API 610**: Centrifugal Pumps for Petroleum, Petrochemical and Natural Gas Industries
+            - **ISO 13709**: Centrifugal pumps for petroleum, petrochemical and natural gas industries
+            - **ANSI/HI 9.6.7**: Effects of Liquid Viscosity on Rotodynamic Pump Performance
+            - **VDI 2173**: Pumps for liquids - Selection of pump types
+        
+            **Hinweis zur Gaslöslichkeit:**
+            - Henry-Konstanten sind experimentell bestimmte Werte
+            - Gelten für ideale Bedingungen (reine Komponenten, niedrige Konzentration)
+                - Bei Gemischen: Partialdruck jeder Komponente einzeln betrachten
+            """)
+        else:
+            st.info("💡 Geben Sie einen Betriebspunkt vor, um die detaillierte Berechnung zu sehen.")
+            st.markdown("""
+            ## Grundlagen der Mehrphasen-Auslegung
+        
+            ### Henry's Law
+        
+            Die Löslichkeit von Gasen in Flüssigkeiten folgt dem **Henry'schen Gesetz**:
+        
+            ```
+            C = p / H(T)
+            ```
+        
+            - Bei **höherem Druck** löst sich mehr Gas
+            - Bei **höherer Temperatur** sinkt die Löslichkeit
+            - Die Henry-Konstante H(T) ist gasspezifisch
+        
+            ### Gas Volume Fraction (GVF)
+        
+            Der GVF beschreibt den Volumenanteil des freien Gases:
+        
+            ```
+            GVF = V_Gas / (V_Gas + V_Flüssigkeit)
+            ```
+        
+            - **GVF = 0%**: Reiner Flüssigkeitsstrom (einphasig)
+            - **GVF > 0%**: Zweiphasenströmung (Gas + Flüssigkeit)
+            - **GVF → 100%**: Reiner Gasstrom
+        
+            ### Mehrphasenpumpen
+        
+            Konventionelle Kreiselpumpen arbeiten typischerweise nur bis ca. **5% GVF** zuverlässig.
+        
+            Für höhere Gasanteile werden Spezialpumpen benötigt:
+            - **Schraubenspindelpumpen**: Bis 95% GVF
+            - **Heliko-axiale Pumpen**: Bis 85% GVF
+            - **Jet-Pumpen**: Variable GVF-Toleranz
+        
+            **→ Geben Sie einen Betriebspunkt vor, um die Berechnung für Ihre Anwendung zu sehen!**
+            """)
+        
+        # Footer
+        st.divider()
+        st.caption("⚗️ Mehrphasen-Pumpenauswahl v1.0 | Vereinfachtes Modell - für Engineering immer Herstellerdaten verwenden!")
 
 # =========================================================
 # PAGE 3: ATEX-MOTORAUSWAHL
