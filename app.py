@@ -331,9 +331,15 @@ def choose_best_mph_pump(MPH_PUMPS, p_req_bar, Q_req_m3h, preferred_gvf=None):
             q_cap = interp_clamped(p_req_bar, ps, qs_m3h)
 
             # harte Ausschlüsse
-            if p_req_bar > float(pump["p_max_bar"]) + 1e-9:
+           if gvf_req > pump["GVF_max"]:
                 continue
-            if Q_req_m3h > float(pump["Q_max_m3h"]) + 1e-9:
+
+            if Q_req > pump["Q_max_m3h"]:
+                continue
+
+            H_available = interp_curve(pump_curve, Q_req)
+
+            if H_available < H_min_threshold:
                 continue
 
             # muss schaffen
