@@ -644,7 +644,7 @@ elif st.session_state.page == "mph":
    # if use_gvf and gvf_input is not None:
         #gvf_frac = gvf_input / 100.0 # GVF in Fraktion (z.B. 0.10)
         #sol_L_L_req = gvf_frac / (1.0 - gvf_frac) 
-        s#ol_cm3_L_req = sol_L_L_req * 1000.0 # Löslichkeit in cm³/L
+        #sol_cm3_L_req = sol_L_L_req * 1000.0 # Löslichkeit in cm³/L
 
         # Zeichne eine Linie, die den angeforderten Gasanteil bei allen Drücken darstellt
         #ax.axhline(sol_cm3_L_req, color='green', linestyle=':', linewidth=2, 
