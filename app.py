@@ -250,7 +250,7 @@ def gas_solubility_volumetric(gas, p_bar, T_celsius):
 
 def solubility_curve_vs_pressure(gas, T_celsius, p_max=14):
     """Löslichkeitskurve: Gasvolumen [cm³/L] vs. Druck [bar]"""
-    pressures = linspace(0, p_max, 100)
+    pressures = np.linspace(0, p_max, 100)
     solubilities = [gas_solubility_volumetric(gas, p, T_celsius) for p in pressures]
     return pressures, solubilities
 
