@@ -489,7 +489,7 @@ elif st.session_state.page == "mph":
 
         Q_max = float(selected_pump["Q_max_m3h"])
         if "Q_op" not in st.session_state or st.session_state.Q_op > Q_max:
-        st.session_state.Q_op = min(50.0, Q_max)
+            st.session_state.Q_op = min(50.0, Q_max)
 
         Q_op = st.number_input(
             "Volumenstrom Q [m³/h]",
