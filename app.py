@@ -499,7 +499,7 @@ elif st.session_state.page == "mph":
         st.divider()
         st.subheader("Betriebspunkt")
         
-         Q_req = st.number_input("Volumenstrom Q [m³/h]", 0.1, 100.0, 15.0, 1.0)
+        Q_req = st.number_input("Volumenstrom Q [m³/h]", 0.1, 100.0, 15.0, 1.0)
         gvf_req = st.slider("Gasanteil GVF [%]", 0, 40, 10, 1)
         p_req = st.number_input("Systemdruck p [bar]", 0.1, 30.0, 5.0, 0.5)
 
