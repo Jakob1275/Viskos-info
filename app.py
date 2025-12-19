@@ -145,11 +145,11 @@ TEMP_CLASSES_LIMITS = {
 }
 
 HENRY_CONSTANTS = {
-    "Luft": {"A": 1300, "B": 1500},
+    "Luft": {"A": 140.0, "B": 1500},
     "CO2": {"A": 29.4, "B": 2400},
-    "O2": {"A": 769.2, "B": 1500},
-    "N2": {"A": 1639.3, "B": 1300},
-    "CH4": {"A": 714.3, "B": 1600},
+    "O2": {"A": 150.0, "B": 1500},
+    "N2": {"A": 165.0, "B": 1300},
+    "CH4": {"A": 140.0, "B": 1600},
 }
 
 # Helper Functions
@@ -225,126 +225,74 @@ def choose_best_pump(pumps, Q_water, H_water, allow_out_of_range=True):
         elif abs(score - best["score"]) <= 1e-9 and eta_at > best["eta_at"]:
             best = cand
     return best
-    
-def pressure_required_from_gvf(gas: str, T_celsius: float, gvf_percent: float) -> float:
-    """
-    Druck p [bar], der nötig wäre, um einen vorgegebenen freien Gasanteil (GVF) vollständig zu lösen
-    (Henry-basiert, Gasvolumen auf STP bezogen wie in gas_solubility_volumetric()).
 
-    GVF-Definition: GVF = V_gas / (V_gas + V_liquid)
+def linspace(start, stop, num):
+    if num == 1: return [start]
+    if num < 1: return []
+    step = (stop - start) / (num - 1)
+    return [start + step * i for i in range(num)]
 
-    Rückgabe: p_req [bar]
-    """
-    gvf = max(0.0, min(0.99, gvf_percent / 100.0))  # nie 1.0 -> Division durch 0 vermeiden
-    if gvf <= 0.0:
-        return 0.0
-
-    # Gasvolumen pro 1 L Flüssigkeit aus GVF:
-    # Verhältnis Vgas/Vliq = gvf/(1-gvf)  [L Gas / L Flüssigkeit]
-    Vgas_per_Lliq_L = gvf / (1.0 - gvf)
-
-    # Umrechnung in cm³/L (weil gas_solubility_volumetric cm³/L liefert)
-    Vgas_per_Lliq_cm3 = Vgas_per_Lliq_L * 1000.0  # 1 L = 1000 cm³
-
-    # in mol/L umrechnen (STP-Annahme wie bei dir: 1 mol = 22400 cm³)
-    C_mol_L = Vgas_per_Lliq_cm3 / 22400.0
-
-    # Henry: C = p / H  => p = C * H(T)
-    H = henry_constant(gas, T_celsius)  # [bar·L/mol] bei dir
-    p_req_bar = C_mol_L * H
-
-    return float(p_req_bar)
-
-
-def parse_gvf_key(key: str) -> float:
-    # "GVF_5_Percent" -> 5.0
-    try:
-        return float(key.split("_")[1])
-    except Exception:
-        return float("nan")
+def m3h_to_lmin(m3h):
+    return m3h * 1000.0 / 60.0
 
 def interp_clamped(x, xs, ys):
-    if len(xs) < 2:
-        return ys[0]
-    if x <= xs[0]:
-        return ys[0]
-    if x >= xs[-1]:
-        return ys[-1]
+    if len(xs) < 2: return ys[0]
+    if x <= xs[0]: return ys[0]
+    if x >= xs[-1]: return ys[-1]
     for i in range(1, len(xs)):
         if x <= xs[i]:
-            x0, y0 = xs[i-1], ys[i-1]
-            x1, y1 = xs[i], ys[i]
-            if x1 == x0:
-                return y1
-            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+            return ys[i-1] + (ys[i] - ys[i-1]) * (x - xs[i-1]) / (xs[i] - xs[i-1])
     return ys[-1]
 
-def choose_best_mph_pump(
-    mph_pumps,
-    Q_req_m3h: float,
-    p_sys_req_bar: float,
-    gvf_req_percent: float,
-    preferred_gvf_percent: float | None = None,
-    safety_margin_bar: float = 0.2,
-):
-    """
-    Wählt automatisch beste Pumpe + nächstliegende GVF-Kurve.
-    Annahme: MPH_Curves enthalten p(Q) (oder H(Q) -> dann vorher umrechnen).
-    
-    Kriterien:
-    - Q_req <= Q_max, gvf_req <= GVF_max
-    - p_available(Q_req) >= p_sys_req + safety_margin
-    - Score: möglichst kleiner Druck-Überhang + Nähe zur preferred_gvf
-    """
+def henry_constant(gas, T_celsius):
+    """Temperaturabhängige Henry-Konstante"""
+    params = HENRY_CONSTANTS.get(gas, {"A": 140.0, "B": 1500})
+    T_K, T0_K = T_celsius + 273.15, 298.15
+    return params["A"] * math.exp(params["B"] * (1/T_K - 1/T0_K))
+
+def gas_solubility_volumetric(gas, p_bar, T_celsius):
+    """Löslichkeit in cm³/L"""
+    H = henry_constant(gas, T_celsius)
+    C_mol_L = p_bar / H
+    return C_mol_L * 22400
+
+def solubility_curve_vs_pressure(gas, T_celsius, p_max=14):
+    """Löslichkeitskurve"""
+    pressures = linspace(0, p_max, 100)
+    solubilities = [gas_solubility_volumetric(gas, p, T_celsius) for p in pressures]
+    return pressures, solubilities
+
+def choose_best_mph_pump(pumps, Q_req, p_req, gvf_req):
+    """Findet beste Pumpe für Betriebspunkt"""
     best = None
-
-    for pump in mph_pumps:
-        if Q_req_m3h > float(pump["Q_max_m3h"]):
-            continue
-        if gvf_req_percent > float(pump["GVF_max"]) * 100.0:
-            continue
-
-        curves = pump.get("MPH_Curves", {})
-        for key, curve in curves.items():
-            gvf_curve = parse_gvf_key(key)
-
-            # curve muss Q und p haben (wie Herstellerplot)
-            # -> falls du aktuell p/H_sim hast, musst du das Datenformat anpassen
-            Qs = curve.get("Q")
-            ps = curve.get("p")
-            if not Qs or not ps:
-                continue
-
-            p_available = interp_clamped(Q_req_m3h, Qs, ps)
-
-            if p_available + 1e-9 < (p_sys_req_bar + safety_margin_bar):
-                continue
-
-            # weiche Präferenz: nimm die Kurve, die der erwarteten GVF am nächsten ist
-            gvf_penalty = 0.0
-            target_gvf = preferred_gvf_percent if preferred_gvf_percent is not None else gvf_req_percent
-            if not math.isnan(gvf_curve):
-                gvf_penalty = abs(gvf_curve - target_gvf) * 0.2
-
-            # Score: knapp passend ist gut
-            p_over = p_available - p_sys_req_bar
-            score = p_over * 5.0 + gvf_penalty
-
-            cand = {
+    for pump in pumps:
+        if Q_req > pump["Q_max_m3h"]: continue
+        if gvf_req > pump["GVF_max"] * 100: continue
+        
+        # Finde nächste GVF-Kurve
+        gvf_keys = sorted([k for k in pump["curves_p_vs_Q"].keys() if k <= gvf_req])
+        if not gvf_keys: continue
+        gvf_key = gvf_keys[-1]
+        
+        curve = pump["curves_p_vs_Q"][gvf_key]
+        p_available = interp_clamped(Q_req, curve["Q"], curve["p"])
+        
+        if p_available < p_req: continue
+        
+        score = abs(p_available - p_req) + abs(gvf_key - gvf_req) * 0.2
+        
+        if best is None or score < best["score"]:
+            power_curve = pump["power_kW_vs_Q"][gvf_key]
+            P_req = interp_clamped(Q_req, power_curve["Q"], power_curve["P"])
+            best = {
                 "pump": pump,
-                "pump_id": pump["id"],
-                "curve_key": key,
-                "gvf_curve": gvf_curve,
+                "gvf_curve": gvf_key,
                 "p_available": p_available,
-                "score": score,
+                "P_required": P_req,
+                "score": score
             }
-
-            if best is None or cand["score"] < best["score"]:
-                best = cand
-
+    
     return best
-
-
 
 # Streamlit App
 st.set_page_config(page_title="Pumpenauslegung", layout="wide")
@@ -550,104 +498,151 @@ elif st.session_state.page == "mph":
 
         st.divider()
         st.subheader("Betriebspunkt")
-        Q_req_m3h = st.number_input("Förderstrom Q_req [m³/h]", 0.1, 500.0, 25.0, 1.0)
-        gvf_operating = st.slider("Gasanteil GVF am Einlass [%]", 0, 25, 10, 1)
-
-        # Druck aus Löslichkeit (Henry-Inversion)
-        p_req = pressure_required_from_gvf(gas_medium, temperature, gvf_operating)
+        
+         Q_req = st.number_input("Volumenstrom Q [m³/h]", 0.1, 100.0, 15.0, 1.0)
+        gvf_req = st.slider("Gasanteil GVF [%]", 0, 40, 10, 1)
+        p_req = st.number_input("Systemdruck p [bar]", 0.1, 30.0, 5.0, 0.5)
 
         st.divider()
         st.subheader("Plot-Optionen")
         show_temp_band = st.checkbox("Löslichkeit bei T-10/T/T+10 zeigen", value=True)
 
     # --- Automatische Pumpenauswahl ---
-    best = choose_best_mph_pump(MPH_PUMPS, p_req, Q_req_m3h, preferred_gvf=gvf_operating)
+    best = choose_best_mph_pump(MPH_PUMPS, Q_req, p_req, gvf_req)
 
-    if best is None:
-        st.error("❌ Keine Pumpe/Kennlinie gefunden, die den Betriebspunkt bei p_req schafft.")
-        st.info("Tipp: reduziere Q_req oder GVF, oder erweitere die Pumpendaten (Kennlinien / p_max / Q_max).")
-        st.stop()
+    # Plot erstellen
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
-    sel_pump = best["pump"]
-    sel_curve_key = best["curve_key"]
+    # --- PLOT 1: Löslichkeit vs. Druck ---
+    temp_variants = [temperature - 10, temperature, temperature + 10]
+    temp_variants = [t for t in temp_variants if -10 <= t <= 100]
 
-    # --- Plot Daten ---
-    fig, axQ = plt.subplots(figsize=(12, 6))
-
-    # 1) Pumpenkennlinien (nur: beste Pumpe, mehrere GVF-Kurven)
-    curves = sel_pump.get("MPH_Curves", {})
-    # sortiert nach GVF
-    curve_items = sorted(curves.items(), key=lambda kv: parse_gvf_key(kv[0]))
-
-    for key, curve in curve_items:
-        gvf_curve = parse_gvf_key(key)
-        ps = curve["p"]
-        qs_m3h = curve["H_sim"]  # Annahme: Q in m³/h
-        qs_lmin = [m3h_to_lmin(q) for q in qs_m3h]
-        label = f"{int(gvf_curve)}% GVF" if not math.isnan(gvf_curve) else key
-        lw = 3.0 if key == sel_curve_key else 1.8
-        alpha = 1.0 if key == sel_curve_key else 0.35
-        axQ.plot(ps, qs_lmin, linewidth=lw, alpha=alpha, label=label)
-
-    # Betriebspunkt (Q als l/min)
-    Q_req_lmin = m3h_to_lmin(Q_req_m3h)
-    axQ.scatter([p_req], [Q_req_lmin], s=160, marker="o",
-                edgecolors="black", linewidths=2, zorder=5, label="Betriebspunkt")
-
-    axQ.set_xlabel("Druck [bar]")
-    axQ.set_ylabel("Förderstrom Q [l/min]")
-    axQ.grid(True, alpha=0.25)
-
-    # 2) Löslichkeit auf 2. Achse (cm³/L)
-    axS = axQ.twinx()
-    if show_temp_band:
-        temp_variants = [temperature - 10, temperature, temperature + 10]
-        temp_variants = [t for t in temp_variants if -10 <= t <= 100]
-    else:
-        temp_variants = [temperature]
-
-    p_max_plot = max(14.0, float(sel_pump["p_max_bar"]), p_req + 1.0)
-    pressures = np.linspace(0.0, p_max_plot, 200)
-
-    for T in temp_variants:
-        sol_cm3L = [gas_solubility_volumetric(gas_medium, p, T) for p in pressures]
-        axS.plot(pressures, sol_cm3L, linestyle="--", linewidth=2, alpha=0.8,
+    colors_temp = ['lightblue', 'darkblue', 'blue']
+    for i, T in enumerate(temp_variants):
+        pressures, solubilities = solubility_curve_vs_pressure(gas_medium, T, p_max=15)
+        ax1.plot(pressures, solubilities, '--', linewidth=2, color=colors_temp[i],
                  label=f"Löslichkeit {gas_medium} {T:.0f}°C")
 
-    axS.set_ylabel("Gaslöslichkeit [cm³/L] (STP)")
-    axS.grid(False)
+    # Betriebspunkt Löslichkeit
+    sol_at_op = gas_solubility_volumetric(gas_medium, p_req, temperature)
+    ax1.scatter([p_req], [sol_at_op], s=200, marker='o', color='red',
+                edgecolors='black', linewidths=2, zorder=5, label='Betriebspunkt')
 
-    # Achsenlimits
-    axQ.set_xlim(0, p_max_plot)
-    # Q-Achse passend machen
-    axQ.set_ylim(0, max(Q_req_lmin * 1.35, 50))
-    # Löslichkeitsachse passend machen
-    axS.set_ylim(0, max(gas_solubility_volumetric(gas_medium, p_max_plot, temperature) * 1.15, 50))
+    ax1.set_xlabel("Druck [bar]", fontsize=12, fontweight='bold')
+    ax1.set_ylabel("Löslichkeit [cm³/l]", fontsize=12, fontweight='bold')
+    ax1.set_title("Gaslöslichkeit nach Henry's Law", fontsize=14, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc='upper left', fontsize=9)
+    ax1.set_xlim(0, 15)
+    ax1.set_ylim(0, 180)
 
-    axQ.set_title("Gaslöslichkeit (Henry) und Mehrphasen-Pumpenkennlinien (automatische Auswahl)")
+    # --- PLOT 2: p-Q Pumpenkennlinien ---
+    if best:
+        pump = best["pump"]
+        curves = pump["curves_p_vs_Q"]
+    
+        # Zeichne alle GVF-Kurven dieser Pumpe
+        gvf_colors = {0: 'black', 5: 'green', 10: 'blue', 15: 'red', 20: 'purple'}
+    
+        for gvf_key in sorted(curves.keys()):
+            curve = curves[gvf_key]
+            Q_lmin = [m3h_to_lmin(q) for q in curve["Q"]]
+            lw = 3.0 if gvf_key == best["gvf_curve"] else 1.8
+            alpha = 1.0 if gvf_key == best["gvf_curve"] else 0.5
+            color = gvf_colors.get(gvf_key, 'gray')
+            ax2.plot(Q_lmin, curve["p"], 'o-', linewidth=lw, alpha=alpha, color=color,
+                    label=f"{pump['id']} ({gvf_key}% GVF)")
+    
+        # GVF-Grenze als horizontale Linie
+        gvf_max_frac = pump["GVF_max"]
+        sol_L_L_max = gvf_max_frac / (1.0 - gvf_max_frac)
+        sol_cm3_L_max = sol_L_L_max * 1000.0
+    
+        # Betriebspunkt
+        Q_req_lmin = m3h_to_lmin(Q_req)
+        ax2.scatter([Q_req_lmin], [p_req], s=200, marker='o', color='red',
+                    edgecolors='black', linewidths=2, zorder=5, label='Betriebspunkt')
+    
+        ax2.set_xlabel("Volumenstrom Q [l/min]", fontsize=12, fontweight='bold')
+        ax2.set_ylabel("Druck p [bar]", fontsize=12, fontweight='bold')
+        ax2.set_title(f"Mehrphasen-Kennlinien: {pump['id']}", fontsize=14, fontweight='bold')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(loc='upper right', fontsize=9)
+        ax2.set_xlim(0, max(m3h_to_lmin(pump["Q_max_m3h"]), Q_req_lmin * 1.2))
+        ax2.set_ylim(0, pump["p_max_bar"] * 1.1)
+    else:
+        ax2.text(0.5, 0.5, '❌ Keine geeignete Pumpe gefunden',
+                 ha='center', va='center', transform=ax2.transAxes, fontsize=14, color='red')
+        ax2.set_xlabel("Volumenstrom Q [l/min]", fontsize=12)
+        ax2.set_ylabel("Druck p [bar]", fontsize=12)
+        ax2.set_title("Mehrphasen-Kennlinien", fontsize=14)
 
-    # Legenden: beide Achsen zusammenführen
-    h1, l1 = axQ.get_legend_handles_labels()
-    h2, l2 = axS.get_legend_handles_labels()
-    axQ.legend(h1 + h2, l1 + l2, loc="lower left", fontsize=9, framealpha=0.95)
-
+    plt.tight_layout()
     st.pyplot(fig, clear_figure=True)
 
-    # --- Kennzahlen / Auswahl ---
+    # Ergebnisse
     st.divider()
-    st.markdown("### ✅ Automatisch ausgewählte Pumpe")
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Pumpe", sel_pump["id"])
-    col2.metric("Typ", sel_pump["type"])
-    col3.metric("Kennlinie", sel_curve_key.replace("_", " "))
-    col4.metric("p_req aus Löslichkeit", f"{p_req:.2f} bar")
+    if best:
+        # Löslichkeit berechnen
+        sol_L_L = sol_at_op / 1000.0
+        gvf_max = (sol_L_L / (1.0 + sol_L_L)) * 100
+    
+        st.markdown("### ✅ **Betriebspunkt Maximaler Löslichkeit**")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("**Druck**", f"**{p_req:.2f} bar**")
+        col2.metric("**Temperatur**", f"**{temperature:.1f} °C**")
+        col3.metric("**Max. Löslichkeit**", f"**{sol_L_L:.3f} L/L**")
+        col4.metric("**Max. GVF**", f"**{gvf_max:.1f} %**")
+    
+        st.markdown("### 🔧 **Empfohlene Pumpe**")
+        st.success(f"**{best['pump']['id']}** bei **{best['gvf_curve']}% GVF**")
+    
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Q", f"{Q_req:.1f} m³/h", f"{m3h_to_lmin(Q_req):.1f} l/min")
+        col2.metric("p verfügbar", f"{best['p_available']:.2f} bar")
+        col3.metric("GVF (Eingabe)", f"{gvf_req:.0f} %")
+        col4.metric("Leistung", f"{best['P_required']:.2f} kW")
+        col5.metric("Max. GVF Pumpe", f"{best['pump']['GVF_max']*100:.0f} %")
+    
+        if gvf_req > gvf_max:
+            st.warning(f"⚠️ Eingegebener GVF ({gvf_req}%) liegt über max. Löslichkeit ({gvf_max:.1f}%) → Freies Gas vorhanden!")
+        else:
+            st.info(f"ℹ️ GVF liegt im Löslichkeitsbereich → Gas kann vollständig gelöst werden")
+    
+    else:
+        st.error("❌ **Keine geeignete Pumpe gefunden!**")
+        st.markdown("""
+        **Mögliche Gründe:**
+        - Volumenstrom zu hoch für verfügbare Pumpen
+        - Gasanteil übersch reitet Pumpengrenze (max. 40%)
+        - Systemdruck kann von keiner Pumpe erreicht werden
+    
+        **Empfehlung:**
+        - Reduzieren Sie Q, GVF oder p
+        - Oder wählen Sie eine größere Pumpe
+        """)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Q_req", f"{Q_req_m3h:.2f} m³/h", f"{Q_req_lmin:.1f} l/min")
-    col2.metric("GVF (Eingabe)", f"{gvf_operating:.0f} %")
-    col3.metric("Q_cap @ p_req", f"{best['q_cap']:.2f} m³/h", f"{m3h_to_lmin(best['q_cap']):.1f} l/min")
+    # Pumpenspezifikationen
+    st.divider()
+    st.markdown("### 📋 Verfügbare Pumpen")
 
+    cols = st.columns(len(MPH_PUMPS))
+    for i, pump in enumerate(MPH_PUMPS):
+        with cols[i]:
+            selected = best and best["pump"]["id"] == pump["id"]
+            if selected:
+                st.success(f"✅ **{pump['id']}**")
+            else:
+                st.info(f"**{pump['id']}**")
+            st.caption(f"Typ: {pump['type']}")
+            st.caption(f"Q_max: {pump['Q_max_m3h']} m³/h")
+            st.caption(f"p_max: {pump['p_max_bar']} bar")
+            st.caption(f"GVF_max: {pump['GVF_max']*100:.0f}%")
+
+    # Footer
+    st.divider()
+    
     # Erklärung
     # Rechenweg und Theorie
     with st.expander("📘 Rechenweg & Theorie: Mehrphasen-Auslegung", expanded=False):
