@@ -536,6 +536,8 @@ elif st.session_state.page == "mph":
     ax1.set_xlim(0, 15)
     ax1.set_ylim(0, 180)
 
+    Q_req_lmin = m3h_to_lmin(Q_req)
+    
     # --- PLOT 2: p-Q Pumpenkennlinien ---
     if best:
         pump = best["pump"]
@@ -553,13 +555,7 @@ elif st.session_state.page == "mph":
             ax2.plot(Q_lmin, curve["p"], 'o-', linewidth=lw, alpha=alpha, color=color,
                     label=f"{pump['id']} ({gvf_key}% GVF)")
     
-        # GVF-Grenze als horizontale Linie
-        gvf_max_frac = pump["GVF_max"]
-        sol_L_L_max = gvf_max_frac / (1.0 - gvf_max_frac)
-        sol_cm3_L_max = sol_L_L_max * 1000.0
-    
         # Betriebspunkt
-        Q_req_lmin = m3h_to_lmin(Q_req)
         ax2.scatter([Q_req_lmin], [p_req], s=200, marker='o', color='red',
                     edgecolors='black', linewidths=2, zorder=5, label='Betriebspunkt')
     
