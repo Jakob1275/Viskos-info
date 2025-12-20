@@ -292,7 +292,7 @@ def find_speed_for_duty_point(pump_curve_Q, pump_curve_H, Q_req, H_req):
     
     return n_ratio
 
-def choose_best_mph_pump_with_speed(pumps, Q_req, p_req, gvf_req):
+def choose_best_mph_pump_with_speed(MPH_PUMPS, Q_req, p_req, gvf_req):
     """
     Erweiterte Pumpenauswahl mit Drehzahlanpassung
     
@@ -434,7 +434,7 @@ if st.session_state.page == "pump":
     col3.metric("B-Zahl", f"{B:.2f}")
     col4.metric("CH / Cη", f"{CH:.3f} / {Ceta:.3f}")
     
-    best = choose_best_mph_pump_with_speed(pumps, Q_req, p_req, gvf_req)
+    best = choose_best_pump(pumps, Q_water, H_water, allow_out_of_range=True)
     if not best:
         st.error("❌ Keine Pumpe gefunden!")
         st.stop()
@@ -604,7 +604,7 @@ elif st.session_state.page == "mph":
         show_temp_band = st.checkbox("Löslichkeit bei T-10/T/T+10 zeigen", value=True)
 
     # --- Automatische Pumpenauswahl ---
-    best = choose_best_mph_pump(MPH_PUMPS, Q_req, p_req, gvf_req)
+    best = choose_best_mph_pump_with_speed(MPH_PUMPS, Q_req, p_req, gvf_req)
 
     # Plot erstellen
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
