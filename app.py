@@ -304,7 +304,7 @@ def choose_best_mph_pump_with_speed(MPH_PUMPS, Q_req, p_req, gvf_req):
     """
     best = None
     
-    for pump in pumps:
+    for pump in MPH_Pumps:
         # Check 1: Volumenstrom (mit Sicherheit, da Drehzahl < 110%)
         if Q_req > pump["Q_max_m3h"] * 1.1:  
             continue
