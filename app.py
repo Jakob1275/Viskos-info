@@ -226,14 +226,18 @@ def m3h_to_lmin(m3h):
     return m3h * 1000.0 / 60.0
 
 def interp_clamped(x, xs, ys):
-    if len(xs) < 2: return ys[0]
-    if x <= xs[0]: return ys[0]
-    if x >= xs[-1]: return ys[-1]
+    """Lineare Interpolation mit Clamping"""
+    if len(xs) < 2: 
+        return ys[0]
+    if x <= xs[0]: 
+        return ys[0]
+    if x >= xs[-1]: 
+        return ys[-1]
     for i in range(1, len(xs)):
         if x <= xs[i]:
             return ys[i-1] + (ys[i] - ys[i-1]) * (x - xs[i-1]) / (xs[i] - xs[i-1])
     return ys[-1]
-
+    
 def henry_constant(gas, T_celsius):
     """Temperaturabhängige Henry-Konstante"""
     params = HENRY_CONSTANTS.get(gas, {"A": 1400.0, "B": 1500})
@@ -252,60 +256,135 @@ def solubility_curve_vs_pressure(gas, T_celsius, p_max=14):
     solubilities = [gas_solubility_volumetric(gas, p, T_celsius) for p in pressures]
     return pressures, solubilities
 
-def choose_best_mph_pump(pumps, Q_req, p_req, gvf_req):
-    """Findet beste Pumpe für Betriebspunkt"""
+def affinity_laws_scale(Q_nom, H_nom, P_nom, n_ratio):
+    """
+    Affinitätsgesetze für Kreiselpumpen:
+    Q ~ n
+    H ~ n²
+    P ~ n³
+    
+    n_ratio = n_new / n_nominal
+    """
+    return Q_nom * n_ratio, H_nom * (n_ratio**2), P_nom * (n_ratio**3)
+
+def find_speed_for_duty_point(pump_curve_Q, pump_curve_H, Q_req, H_req):
+    """
+    Findet die optimale Drehzahl, um den geforderten Betriebspunkt zu treffen.
+    
+    Vorgehensweise:
+    1. Finde Punkt auf Nennkennlinie bei Q_req
+    2. Berechne benötigtes n_ratio: sqrt(H_req / H_nominal)
+    
+    Returns: n_ratio (1.0 = Nenndrehzahl), oder None wenn nicht möglich
+    """
+    # Interpoliere H bei Q_req auf Nennkennlinie
+    H_nom_at_Q = interp_clamped(Q_req, pump_curve_Q, pump_curve_H)
+    
+    # Benötigte Drehzahl: H ~ n²  =>  n_ratio = sqrt(H_req / H_nom)
+    if H_nom_at_Q <= 0:
+        return None
+    
+    n_ratio = math.sqrt(H_req / H_nom_at_Q)
+    
+    # Prüfe ob Drehzahl im sinnvollen Bereich (50% - 110%)
+    if n_ratio < 0.5 or n_ratio > 1.1:
+        return None
+    
+    return n_ratio
+
+def choose_best_mph_pump_with_speed(pumps, Q_req, p_req, gvf_req):
+    """
+    Erweiterte Pumpenauswahl mit Drehzahlanpassung
+    
+    Strategie:
+    1. Prüfe ob Pumpe grundsätzlich geeignet (Q_max, GVF_max)
+    2. Nutze WORST-CASE GVF-Kurve (höchster erwarteter GVF)
+    3. Berechne optimale Drehzahl für Betriebspunkt
+    4. Prüfe ob bei dieser Drehzahl p >= p_req
+    """
     best = None
     
     for pump in pumps:
-        # Check 1: Volumenstrom
-        if Q_req > pump["Q_max_m3h"]: 
+        # Check 1: Volumenstrom (mit Sicherheit, da Drehzahl < 110%)
+        if Q_req > pump["Q_max_m3h"] * 1.1:  
             continue
         
-        # Check 2: GVF
-        if gvf_req > pump["GVF_max"] * 100: 
-            continue
-        
-        # Finde passende oder nächstkleinere GVF-Kurve
+        # Check 2: GVF - nehme HÖCHSTE verfügbare Kurve <= gvf_req (Worst Case)
         available_gvf_keys = [k for k in pump["curves_p_vs_Q"].keys() if k <= gvf_req]
         if not available_gvf_keys:
-            # Wenn GVF < kleinste Kurve, nehme kleinste Kurve (0%)
-            available_gvf_keys = [min(pump["curves_p_vs_Q"].keys())]
+            # Wenn gvf_req < kleinste Kurve, nutze kleinste Kurve
+            gvf_key = min(pump["curves_p_vs_Q"].keys())
+        else:
+            # WICHTIG: Nutze HÖCHSTE Kurve als Worst-Case-Szenario
+            gvf_key = max(available_gvf_keys)
         
-        gvf_key = max(available_gvf_keys)  # Nehme größte verfügbare Kurve <= gvf_req
+        # Wenn gvf_req die Pumpengrenze überschreitet
+        if gvf_req > pump["GVF_max"] * 100:
+            continue
         
         curve = pump["curves_p_vs_Q"][gvf_key]
-        
-        # Interpoliere Druck bei Q_req
-        if Q_req < min(curve["Q"]) or Q_req > max(curve["Q"]):
-            # Q außerhalb des Kennlinienbereichs
-            continue
-            
-        p_available = interp_clamped(Q_req, curve["Q"], curve["p"])
-        
-        # Check 3: Verfügbarer Druck muss größer als geforderter Druck sein
-        if p_available < p_req * 0.95:  # 5% Toleranz
-            continue
-        
-        # Berechne Score (je kleiner, desto besser)
-        p_reserve = p_available - p_req
-        gvf_diff = abs(gvf_key - gvf_req)
-        score = p_reserve * 0.5 + gvf_diff * 0.2
-        
-        # Leistungsaufnahme
         power_curve = pump["power_kW_vs_Q"][gvf_key]
-        P_req = interp_clamped(Q_req, power_curve["Q"], power_curve["P"])
         
-        cand = {
-            "pump": pump,
-            "gvf_curve": gvf_key,
-            "p_available": p_available,
-            "P_required": P_req,
-            "score": score,
-            "p_reserve": p_reserve
-        }
+        # Prüfe ob Q im Kennlinienbereich
+        Q_min_curve = min(curve["Q"])
+        Q_max_curve = max(curve["Q"])
         
-        if best is None or score < best["score"]:
-            best = cand
+        # Variante A: Betrieb bei Nenndrehzahl
+        if Q_min_curve <= Q_req <= Q_max_curve:
+            p_available_nom = interp_clamped(Q_req, curve["Q"], curve["p"])
+            P_nom = interp_clamped(Q_req, power_curve["Q"], power_curve["P"])
+            
+            if p_available_nom >= p_req * 0.95:  # 5% Toleranz
+                score = abs(p_available_nom - p_req) + abs(gvf_key - gvf_req) * 0.2
+                
+                cand = {
+                    "pump": pump,
+                    "gvf_curve": gvf_key,
+                    "p_available": p_available_nom,
+                    "P_required": P_nom,
+                    "n_ratio": 1.0,
+                    "n_rpm": None,  # Nenndrehzahl (unbekannt ohne weitere Daten)
+                    "score": score,
+                    "p_reserve": p_available_nom - p_req,
+                    "mode": "Nenndrehzahl"
+                }
+                
+                if best is None or score < best["score"]:
+                    best = cand
+        
+        # Variante B: Drehzahlanpassung
+        # Finde optimale Drehzahl für Q_req und p_req
+        n_ratio = find_speed_for_duty_point(curve["Q"], curve["p"], Q_req, p_req)
+        
+        if n_ratio is not None:
+            # Skaliere Kennlinie mit Affinitätsgesetzen
+            Q_scaled_max = Q_max_curve * n_ratio
+            
+            # Prüfe ob Q_req noch im Bereich
+            if Q_req <= Q_scaled_max:
+                # Berechne verfügbaren Druck bei skalierter Kennlinie
+                p_available_scaled = p_req  # Per Definition, da wir n_ratio so berechnet haben
+                
+                # Leistung skalieren (P ~ n³)
+                P_scaled = interp_clamped(Q_req / n_ratio, power_curve["Q"], power_curve["P"]) * (n_ratio**3)
+                
+                # Score: Bevorzuge Nenndrehzahl, aber mit Drehzahlanpassung ist auch OK
+                score = abs(1.0 - n_ratio) * 5.0 + abs(gvf_key - gvf_req) * 0.2
+                
+                cand = {
+                    "pump": pump,
+                    "gvf_curve": gvf_key,
+                    "p_available": p_available_scaled,
+                    "P_required": P_scaled,
+                    "n_ratio": n_ratio,
+                    "n_rpm": None,  # Könnte berechnet werden wenn Nenndrehzahl bekannt
+                    "score": score,
+                    "p_reserve": 0.0,  # Exakt getroffen
+                    "mode": f"Drehzahl {n_ratio*100:.1f}%"
+                }
+                
+                if best is None or score < best["score"]:
+                    best = cand
     
     return best
 
