@@ -434,7 +434,7 @@ if st.session_state.page == "pump":
     col3.metric("B-Zahl", f"{B:.2f}")
     col4.metric("CH / Cη", f"{CH:.3f} / {Ceta:.3f}")
     
-    best = choose_best_pump(PUMPS, Q_water, H_water, allow_out)
+    best = choose_best_mph_pump_with_speed(pumps, Q_req, p_req, gvf_req)
     if not best:
         st.error("❌ Keine Pumpe gefunden!")
         st.stop()
@@ -450,12 +450,14 @@ if st.session_state.page == "pump":
     st.markdown("### ✅ **AUSLEGUNGSERGEBNIS**")
     st.success(f"**Gewählte Pumpe: {best['id']}**")
     
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("**H bei Q**", f"**{best['H_at']:.2f} m**")
-    col2.metric("**η_viskos**", f"**{eta_vis:.3f}**")
-    col3.metric("**P_Welle**", f"**{P_vis_kW:.2f} kW**")
-    col4.metric("**Motor**", f"**{P_motor_kW:.2f} kW**")
-    col5.metric("**Reserve**", f"**{reserve_pct}%**")
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1.metric("Q", f"{Q_req:.1f} m³/h", f"{m3h_to_lmin(Q_req):.1f} l/min")
+    col2.metric("p verfügbar", f"{best['p_available']:.2f} bar")
+    col3.metric("Drehzahl", f"{best['n_ratio']*100:.1f}%", 
+               "Nenn-n" if abs(best['n_ratio'] - 1.0) < 0.05 else "variable n")
+    col4.metric("GVF (Eingabe)", f"{gvf_req:.0f} %")
+    col5.metric("Leistung", f"{best['P_required']:.2f} kW")
+    col6.metric("Max. GVF Pumpe", f"{best['pump']['GVF_max']*100:.0f} %")
     
     if not best["in_range"]:
         st.warning(f"⚠️ Q außerhalb Kennlinie ({min(p['Qw'])}...{max(p['Qw'])} m³/h)")
@@ -836,7 +838,30 @@ elif st.session_state.page == "mph":
             - p verfügbar bei Q: **{best['p_available']:.2f} bar**
             - p erforderlich: **{p_req:.2f} bar** {"✅" if best['p_available'] >= p_req else "❌"}
             - Leistungsaufnahme: **{best['P_required']:.2f} kW**
-        
+            - **Drehzahl-Modus**: {best['mode']}
+            - **Drehzahl-Verhältnis**: n/n_nom = {best['n_ratio']:.3f}
+            {f"- **Energieeinsparung**: ~{(1 - best['n_ratio']**3)*100:.1f}% bei Teillast" if best['n_ratio'] < 0.95 else ""}
+            
+            ---
+            
+            ### 4a️⃣ Affinitätsgesetze für Drehzahlanpassung
+            
+            Bei Kreiselpumpen gelten folgende Zusammenhänge:
+            
+            ```
+            Q ~ n        (Volumenstrom proportional zur Drehzahl)
+            H ~ n²       (Förderhöhe proportional zu Drehzahl²)
+            P ~ n³       (Leistung proportional zu Drehzahl³)
+            ```
+            
+            **Für diesen Betriebspunkt:**
+            - Nenndrehzahl würde bei Q={Q_req:.1f} m³/h einen Druck von {interp_clamped(Q_req, pump['curves_p_vs_Q'][best['gvf_curve']]['Q'], pump['curves_p_vs_Q'][best['gvf_curve']]['p']):.2f} bar liefern
+            - Erforderlich sind: {p_req:.2f} bar
+            - Optimale Drehzahl: {best['n_ratio']*100:.1f}% der Nenndrehzahl
+            
+            **Energetischer Vorteil:**
+            {"Durch die Drehzahlreduktion wird die Leistungsaufnahme um etwa " + f"{(1 - best['n_ratio']**3)*100:.1f}% reduziert (P ~ n³)" if best['n_ratio'] < 0.95 else "Betrieb bei Nenndrehzahl optimal"}
+
             ---
         
             ### 5️⃣ Physikalische Zusammenhänge
