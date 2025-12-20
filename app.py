@@ -292,7 +292,7 @@ def find_speed_for_duty_point(pump_curve_Q, pump_curve_H, Q_req, H_req):
     
     return n_ratio
 
-def choose_best_mph_pump_with_speed(MPH_PUMPS, Q_req, p_req, gvf_req):
+def choose_best_mph_pump_with_speed(pumps, Q_req, p_req, gvf_req):
     """
     Erweiterte Pumpenauswahl mit Drehzahlanpassung
     
