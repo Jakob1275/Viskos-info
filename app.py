@@ -145,11 +145,11 @@ TEMP_CLASSES_LIMITS = {
 }
 
 HENRY_CONSTANTS = {
-    "Luft": {"A": 140.0, "B": 1500},
+    "Luft": {"A": 1400.0, "B": 1500},
     "CO2": {"A": 29.4, "B": 2400},
-    "O2": {"A": 150.0, "B": 1500},
-    "N2": {"A": 165.0, "B": 1300},
-    "CH4": {"A": 140.0, "B": 1600},
+    "O2": {"A": 1500.0, "B": 1500},
+    "N2": {"A": 1650.0, "B": 1300},
+    "CH4": {"A": 1400.0, "B": 1600},
 }
 
 def clamp(x, a, b): return max(a, min(b, x))
@@ -236,7 +236,7 @@ def interp_clamped(x, xs, ys):
 
 def henry_constant(gas, T_celsius):
     """Temperaturabhängige Henry-Konstante"""
-    params = HENRY_CONSTANTS.get(gas, {"A": 140.0, "B": 1500})
+    params = HENRY_CONSTANTS.get(gas, {"A": 1400.0, "B": 1500})
     T_K, T0_K = T_celsius + 273.15, 298.15
     return params["A"] * math.exp(params["B"] * (1/T_K - 1/T0_K))
 
