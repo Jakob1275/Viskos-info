@@ -255,32 +255,57 @@ def solubility_curve_vs_pressure(gas, T_celsius, p_max=14):
 def choose_best_mph_pump(pumps, Q_req, p_req, gvf_req):
     """Findet beste Pumpe für Betriebspunkt"""
     best = None
+    
     for pump in pumps:
-        if Q_req > pump["Q_max_m3h"]: continue
-        if gvf_req > pump["GVF_max"] * 100: continue
+        # Check 1: Volumenstrom
+        if Q_req > pump["Q_max_m3h"]: 
+            continue
         
-        # Finde nächste GVF-Kurve
-        gvf_keys = sorted([k for k in pump["curves_p_vs_Q"].keys() if k <= gvf_req])
-        if not gvf_keys: continue
-        gvf_key = gvf_keys[-1]
+        # Check 2: GVF
+        if gvf_req > pump["GVF_max"] * 100: 
+            continue
+        
+        # Finde passende oder nächstkleinere GVF-Kurve
+        available_gvf_keys = [k for k in pump["curves_p_vs_Q"].keys() if k <= gvf_req]
+        if not available_gvf_keys:
+            # Wenn GVF < kleinste Kurve, nehme kleinste Kurve (0%)
+            available_gvf_keys = [min(pump["curves_p_vs_Q"].keys())]
+        
+        gvf_key = max(available_gvf_keys)  # Nehme größte verfügbare Kurve <= gvf_req
         
         curve = pump["curves_p_vs_Q"][gvf_key]
+        
+        # Interpoliere Druck bei Q_req
+        if Q_req < min(curve["Q"]) or Q_req > max(curve["Q"]):
+            # Q außerhalb des Kennlinienbereichs
+            continue
+            
         p_available = interp_clamped(Q_req, curve["Q"], curve["p"])
         
-        if p_available < p_req: continue
+        # Check 3: Verfügbarer Druck muss größer als geforderter Druck sein
+        if p_available < p_req * 0.95:  # 5% Toleranz
+            continue
         
-        score = abs(p_available - p_req) + abs(gvf_key - gvf_req) * 0.2
+        # Berechne Score (je kleiner, desto besser)
+        p_reserve = p_available - p_req
+        gvf_diff = abs(gvf_key - gvf_req)
+        score = p_reserve * 0.5 + gvf_diff * 0.2
+        
+        # Leistungsaufnahme
+        power_curve = pump["power_kW_vs_Q"][gvf_key]
+        P_req = interp_clamped(Q_req, power_curve["Q"], power_curve["P"])
+        
+        cand = {
+            "pump": pump,
+            "gvf_curve": gvf_key,
+            "p_available": p_available,
+            "P_required": P_req,
+            "score": score,
+            "p_reserve": p_reserve
+        }
         
         if best is None or score < best["score"]:
-            power_curve = pump["power_kW_vs_Q"][gvf_key]
-            P_req = interp_clamped(Q_req, power_curve["Q"], power_curve["P"])
-            best = {
-                "pump": pump,
-                "gvf_curve": gvf_key,
-                "p_available": p_available,
-                "P_required": P_req,
-                "score": score
-            }
+            best = cand
     
     return best
 
