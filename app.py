@@ -636,118 +636,62 @@ if st.session_state.page == "pump":
     with st.expander("📘 Rechenweg – Schritt 1: HI-ähnliche Kennzahl B", expanded=False):
 
         st.markdown("""
-### Ziel dieses Schrittes
-
-Pumpenkennlinien werden in der Regel **für Wasser** angegeben.  
-Wird jedoch ein **viskoses Medium** gefördert (z. B. Öl, Emulsionen, hochviskose Kühlschmierstoffe),
-ändert sich das hydraulische Verhalten der Pumpe deutlich:
-
-- der **Förderstrom sinkt**,  
-- die **Förderhöhe nimmt ab**,  
-- der **Wirkungsgrad verschlechtert sich**,  
-- die **Leistungsaufnahme steigt**.
-
-Um diese Effekte **quantitativ abschätzen** zu können, verwendet das *Hydraulic Institute (HI)*
-eine dimensionslose Kennzahl, mit der entschieden wird,
-**ob und wie stark** eine Viskositätskorrektur notwendig ist.
-
----
-
-### Grundidee der Kennzahl B
-
-Die HI-Kennzahl **B** beschreibt,  
-wie stark sich **viskose Reibungseffekte** gegenüber den idealen (wasserähnlichen) Strömungsverhältnissen auswirken.
-
-Dabei fließen drei Einflussgrößen ein:
-
-1. **Viskosität des Mediums (ν)**  
-   → je höher die Viskosität, desto stärker die Abweichung vom Wasserbetrieb
-
-2. **Förderstrom der Pumpe (Q)**  
-   → bei kleinen Förderströmen dominieren viskose Verluste
-
-3. **Förderhöhe der Pumpe (H)**  
-   → hohe Förderhöhen relativieren viskose Effekte
-
-Die Kennzahl B fasst diese Effekte in **einer einzigen dimensionslosen Zahl** zusammen.
-
----
-
-### Umrechnung der Größen
-
-Da die ursprüngliche HI-Formulierung auf **US-Einheiten** basiert, werden die Größen intern umgerechnet:
-
-- Förderstrom **Q → gpm** (gallons per minute)  
-- Förderhöhe **H → ft** (feet)  
-- kinematische Viskosität **ν → cSt** (centistokes)
-
-Diese Umrechnung erfolgt automatisch im Hintergrund.
-
----
-
-### Definition der HI-ähnlichen Kennzahl B
-""")
-
-    st.latex(r"""
-B = 16.5 \cdot \frac{\sqrt{\nu}}{Q_{gpm}^{0.25} \cdot H_{ft}^{0.375}}
-""")
-
-    st.markdown(f"""
-**Bedeutung der Terme:**
-
-- **ν** … kinematische Viskosität des Mediums [cSt]  
-- **Q\_{{gpm}}** … Förderstrom in gpm  
-- **H\_{{ft}}** … Förderhöhe in ft  
-- **16.5** … empirischer Skalierungsfaktor aus HI-Versuchsdaten  
-
----
-
-### Ergebnis für den aktuellen Betriebspunkt
-
-Für die eingegebenen Betriebsdaten ergibt sich:
-
-- **B = {B:.3f}**
-
----
-
-### Interpretation der Kennzahl B
-
-Die Größe von **B** entscheidet darüber,  
-**ob eine Viskositätskorrektur notwendig ist und wie stark sie ausfällt**:
-
-- **B < 1**  
-  → viskose Effekte sind gering  
-  → Wasserkennlinie ist eine gute Näherung  
-
-- **1 ≤ B < 5**  
-  → viskose Effekte sind spürbar  
-  → Förderhöhe und Wirkungsgrad müssen korrigiert werden  
-
-- **B ≥ 5**  
-  → starke viskose Einflüsse  
-  → deutliche Abweichung von der Wasserkennlinie  
-  → Leistungsbedarf steigt stark an  
-
-Im vorliegenden Fall (**B = {B:.2f}**) befinden wir uns somit im Bereich  
-**deutlich relevanter viskoser Effekte**.
-
----
-
 ### Konsequenz für die weitere Berechnung
 
-Auf Basis der Kennzahl **B** werden in den folgenden Schritten:
+Die ermittelte Kennzahl **B** dient als zentrales Entscheidungskriterium
+für die weitere Vorgehensweise bei der Pumpenauslegung.
 
-- Korrekturfaktoren für  
-  - Förderstrom (**C<sub>Q</sub>**),  
-  - Förderhöhe (**C<sub>H</sub>**),  
-  - Wirkungsgrad (**C<sub>η</sub>**)  
+Abhängig von der Größe von **B** werden in den folgenden Schritten
+**Viskositätskorrekturen** auf die ursprüngliche Wasserkennlinie angewendet.
 
-ermittelt und auf die Wasserkennlinie angewendet.
+---
 
-Damit wird sichergestellt,  
-dass die Pumpenauswahl **realistisch** und **betriebssicher** erfolgt.
+### Bestimmung der Korrekturfaktoren
+
+Konkret werden auf Basis von **B** folgende Korrekturfaktoren ermittelt:
 """)
 
+st.latex(r"""
+C_Q \quad \text{(Korrekturfaktor für den Förderstrom)}
+""")
+
+st.latex(r"""
+C_H \quad \text{(Korrekturfaktor für die Förderhöhe)}
+""")
+
+st.latex(r"""
+C_\eta \quad \text{(Korrekturfaktor für den Wirkungsgrad)}
+""")
+
+st.markdown("""
+Diese Faktoren beschreiben, **wie stark** sich das reale Betriebsverhalten
+der Pumpe bei viskosen Medien von der idealisierten Wasserkennlinie unterscheidet.
+
+---
+
+### Anwendung auf die Wasserkennlinie
+
+Die Korrekturfaktoren werden auf die Wasserkennlinie angewendet, um:
+
+- den **reduzierten Förderstrom**,  
+- die **verminderte Förderhöhe** sowie  
+- den **abgesenkten Wirkungsgrad**  
+
+unter realistischen Betriebsbedingungen zu bestimmen.
+
+---
+
+### Ziel der Korrektur
+
+Durch dieses Vorgehen wird sichergestellt, dass:
+
+- die Pumpenauswahl **nicht zu optimistisch** erfolgt,  
+- der tatsächliche Betriebspunkt **korrekt getroffen** wird,  
+- eine **Überlastung des Motors** vermieden wird und  
+- die Auslegung insgesamt **realistisch und betriebssicher** ist.
+
+Die Kennzahl **B** bildet damit die **Brücke zwischen idealer Kennlinie und realem Anlagenbetrieb**.
+""")
 
 # =========================================================
 # PAGE 2: Mehrphase
