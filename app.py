@@ -635,65 +635,155 @@ if st.session_state.page == "pump":
 
     with st.expander("📘 Rechenweg – Schritt 1: HI-ähnliche Kennzahl B", expanded=False):
 
-        st.markdown("""
-### Konsequenz für die weitere Berechnung
+        st.markdown(f"""
+## Rechenweg (Einphasen / Viskosität) – ausführlich
 
-Die ermittelte Kennzahl **B** dient als zentrales Entscheidungskriterium
-für die weitere Vorgehensweise bei der Pumpenauslegung.
-
-Abhängig von der Größe von **B** werden in den folgenden Schritten
-**Viskositätskorrekturen** auf die ursprüngliche Wasserkennlinie angewendet.
-
----
-
-### Bestimmung der Korrekturfaktoren
-
-Konkret werden auf Basis von **B** folgende Korrekturfaktoren ermittelt:
-""")
-
-        st.latex(r"""
-C_Q \quad \text{(Korrekturfaktor für den Förderstrom)}
-""")
-
-        st.latex(r"""
-C_H \quad \text{(Korrekturfaktor für die Förderhöhe)}
-""")
-
-        st.latex(r"""
-C_\eta \quad \text{(Korrekturfaktor für den Wirkungsgrad)}
-""")
-
-        st.markdown("""
-Diese Faktoren beschreiben, **wie stark** sich das reale Betriebsverhalten
-der Pumpe bei viskosen Medien von der idealisierten Wasserkennlinie unterscheidet.
+### Ziel
+Wir haben einen gewünschten Betriebspunkt im **viskosen Medium** (Qᵥ, Hᵥ, ν, ρ).
+Pumpenkennlinien liegen aber meist als **Wasserkennlinien** vor (Qw, Hw, ηw).
+Deshalb rechnen wir den viskosen Betriebspunkt auf einen **äquivalenten Wasserpunkt** um, wählen darauf eine Pumpe aus,
+und berechnen danach Leistung und (optional) eine viskos korrigierte Kennlinie.
 
 ---
 
-### Anwendung auf die Wasserkennlinie
+### Eingaben
+- **Qᵥ** = {Q_vis_req:.3f} m³/h  (geforderter Volumenstrom im viskosen Medium)
+- **Hᵥ** = {H_vis_req:.3f} m    (geforderte Förderhöhe im viskosen Medium)
+- **ν**  = {nu:.3f} cSt         (kinematische Viskosität)
+- **ρ**  = {rho:.1f} kg/m³      (Dichte)
 
-Die Korrekturfaktoren werden auf die Wasserkennlinie angewendet, um:
-
-- den **reduzierten Förderstrom**,  
-- die **verminderte Förderhöhe** sowie  
-- den **abgesenkten Wirkungsgrad**  
-
-unter realistischen Betriebsbedingungen zu bestimmen.
+Hinweis: 1 cSt = 1 mm²/s = 1e-6 m²/s.
 
 ---
 
-### Ziel der Korrektur
+## Schritt 1: Kennzahl B (HI-nahe Kennzahl)
+Die Kennzahl **B** beschreibt, wie stark Viskositätseffekte im Betriebspunkt zu erwarten sind.
+Je größer B, desto stärker verschieben sich Kennlinie, Wirkungsgrad und Leistungsbedarf.
 
-Durch dieses Vorgehen wird sichergestellt, dass:
+### Umrechnung der Einheiten (HI-typisch)
+Die HI-Korrelationen arbeiten traditionell mit:
+- Q in **gpm**
+- H in **ft**
 
-- die Pumpenauswahl **nicht zu optimistisch** erfolgt,  
-- der tatsächliche Betriebspunkt **korrekt getroffen** wird,  
-- eine **Überlastung des Motors** vermieden wird und  
-- die Auslegung insgesamt **realistisch und betriebssicher** ist.
+Wir rechnen deshalb um:
+- Q_gpm = Q(m³/h) * 4.40287
+- H_ft  = H(m) * 3.28084
 
-Die Kennzahl **B** bildet damit die **Brücke zwischen idealer Kennlinie und realem Anlagenbetrieb**. 
+### Formel (pragmatisch HI-nah)
+B = 16.5 * sqrt(ν) / ( Q_gpm^0.25 * H_ft^0.375 )
 
-""") 
+Dabei ist ν in **cSt** eingesetzt (wie in vielen HI-Näherungen üblich).
+Im Code ist das:
 
+- Q_gpm = {Q_water:.3f} * 4.40287
+- H_ft  = {H_water:.3f} * 3.28084
+
+Ergebnis:
+- **B = {B:.3f}**
+
+Interpretation:
+- B < 1 → Viskosität hat eher kleine Effekte
+- B ≥ 1 → Korrekturen werden relevant (Kennlinie „fällt ab“, η sinkt, P steigt)
+
+---
+
+## Schritt 2: Korrekturfaktoren CH und Cη
+Wir erzeugen aus B zwei Korrekturwerte:
+
+### (a) CH – Förderhöhenfaktor
+CH < 1 bedeutet: bei gleicher Drehzahl liefert die Pumpe im viskosen Medium weniger Förderhöhe.
+
+Im Code wird CH als Funktion von log10(B) angenähert und begrenzt:
+- CH = clamp(exp(-0.165 * (log10(B)^2.2)), 0.3, 1.0)
+
+Ergebnis:
+- **CH = {CH:.4f}**
+
+### (b) Cη – Wirkungsgradfaktor
+Cη < 1 bedeutet: der Wirkungsgrad sinkt im viskosen Betrieb (mehr innere Verluste).
+
+Im Code:
+- Cη = 1 - 0.25*log10(B) - 0.05*(log10(B)^2)
+- begrenzt auf [0.1, 1.0]
+
+Ergebnis:
+- **Cη = {Ceta:.4f}**
+
+---
+
+## Schritt 3: Umrechnung viskos → äquivalenter Wasserbetriebspunkt
+Unsere Pumpendatenbank ist als Wasserkennlinie gegeben.
+Wir wollen also den Betriebspunkt auf der Wasserkennlinie finden, der „entspricht“.
+
+Vereinfachte Logik hier:
+- Volumenstrom wird (in dieser Näherung) gleichgesetzt:  
+  **Q_w = Qᵥ**
+- Förderhöhe wird korrigiert über CH:  
+  **H_w = Hᵥ / CH**
+
+Warum Division?
+Wenn die Pumpe viskos nur CH*H_w liefert, dann brauchst du auf Wasserkennlinie eine höhere Höhe,
+damit nach Abfall wieder Hᵥ erreicht wird.
+
+Ergebnis:
+- **Q_w = {Q_water:.3f} m³/h**
+- **H_w = {H_water:.3f} m**
+
+---
+
+## Schritt 4: Pumpenauswahl auf Wasserkennlinie
+Für jede Pumpe p:
+1) prüfe ob Q_w innerhalb der Kennlinie liegt (qmin..qmax)
+2) interpoliere H_at(Q_w) und η_at(Q_w)
+3) berechne einen Score = |H_at - H_w| + Strafterm (falls außerhalb)
+
+Die gewählte Pumpe ist die mit minimalem Score (bei Gleichstand höhere η).
+
+Auswahlresultat:
+- **Pumpe = {best['id']}**
+- H_at(Q_w) = {best['H_at']:.3f} m
+- η_w(Q_w)  = {best['eta_at']:.3f}
+
+---
+
+## Schritt 5: Leistung im viskosen Betrieb
+Zuerst hydraulische Leistung (ohne Verluste):
+P_hyd = ρ * g * Q * H
+
+- Q in m³/s: Qᵥ / 3600
+- g = 9.80665 m/s²
+
+Dann Wellenleistung:
+P_shaft = P_hyd / η_vis
+
+Wirkungsgrad im viskosen Betrieb:
+η_vis = η_w * Cη
+
+Ergebnis:
+- η_vis = {eta_vis:.4f}
+- P_hyd = {P_hyd_W:.1f} W
+- P_shaft = {P_vis_kW:.3f} kW
+
+---
+
+## Schritt 6: Motorbemessung (IEC-Stufen)
+Wir schlagen eine Motorgröße anhand normierter IEC-Stufen vor:
+- P_motor = IEC( P_shaft * (1 + Reserve) )
+
+Reserve = {reserve_pct:.0f}%
+
+Ergebnis:
+- IEC Motor = {P_motor_kW:.2f} kW
+
+---
+
+### Was wird geplottet?
+- Wasserkennlinie Q-H, Q-η, Q-P aus Datenbank
+- daraus abgeleitete viskose Kennlinie:
+  für jedes Kennlinien-Q wird (H*CH, η*Cη, P neu) berechnet
+- Markierung Betriebspunkt (Wasserpunkt und viskoser Punkt)
+
+""")
 
 
 # =========================================================
