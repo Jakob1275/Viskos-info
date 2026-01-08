@@ -634,7 +634,7 @@ if st.session_state.page == "pump":
         st.pyplot(fig3, clear_figure=True)
 
     with st.expander("📘 Rechenweg & Formeln (ausführlich)", expanded=False):
-        st.markdown(f"""
+    st.markdown(f"""
 **Gegeben (viskos):**  
 - Förderstrom: **Qᵥ = {Q_vis_req:.3f} m³/h**  
 - Förderhöhe: **Hᵥ = {H_vis_req:.3f} m**  
@@ -649,9 +649,11 @@ wie stark Viskosität die Kennlinie beeinflusst.
 
 - Umrechnung: Q → gpm, H → ft  
 - Formel:  
+
 \\[
-B = 16.5 \\cdot \\frac{\\sqrt{\\nu}}{Q_{gpm}^{0.25} \\cdot H_{ft}^{0.375}}
+B = 16.5 \\cdot \\frac{{\\sqrt{{\\nu}}}}{{Q_{{gpm}}^{{0.25}} \\cdot H_{{ft}}^{{0.375}}}}
 \\]
+
 Ergebnis: **B = {B:.3f}**
 
 Interpretation:  
@@ -675,17 +677,18 @@ Für die Pumpenauswahl wird auf der Wasserkennlinie verglichen.
 
 - Förderstrom: \\(Q_w = Qᵥ\\) (hier unverändert)  
 - Förderhöhe:  
+
 \\[
-H_w = \\frac{Hᵥ}{CH}
+H_w = \\frac{{Hᵥ}}{{CH}}
 \\]
+
 ⇒ **Q_w = {Q_water:.3f} m³/h**, **H_w = {H_water:.3f} m**
 
 ---
 
 ## Schritt 4: Pumpenauswahl auf Wasserkennlinie
 Für jede Pumpe wird bei \\(Q_w\\) die Förderhöhe \\(H(Q_w)\\) interpoliert
-und der Abstand zu \\(H_w\\) bewertet. Optional kann außerhalb des Q-Bereichs
-geclamped werden.
+und der Abstand zu \\(H_w\\) bewertet.
 
 Gewählt: **{best['id']}**
 
@@ -695,21 +698,21 @@ Gewählt: **{best['id']}**
 Wellenleistung (physikalisch konsistent):
 
 \\[
-P = \\frac{\\rho g Q H}{\\eta}
+P = \\frac{{\\rho g Q H}}{{\\eta}}
 \\]
 
 mit \\(Q\\) in m³/s: \\(Q = Qᵥ/3600\\)
 
-- \\(\\eta_{vis} = \\eta_w \\cdot Cη = {eta_vis_op:.4f}\\)
-- \\(P_{vis} = {P_vis_kW:.3f} kW\\)
+- \\(\\eta_{{vis}} = \\eta_w \\cdot Cη = {eta_vis_op:.4f}\\)
+- \\(P_{{vis}} = {P_vis_kW:.3f} \\, kW\\)
 
 ---
 
 ## Schritt 6: Motorreserve und IEC-Stufung
 - Reserve: **{reserve_pct}%**  
-- \\(P_{Motor, min} = P_{vis} \\cdot (1 + Reserve)\\)  
+- \\(P_{{Motor,min}} = P_{{vis}} \\cdot (1 + Reserve)\\)  
 - Rundung auf IEC-Stufe ⇒ **{P_motor_kW:.2f} kW**
-        """)
+    """)
 
 # =========================================================
 # PAGE 2: Mehrphase
