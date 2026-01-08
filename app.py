@@ -633,86 +633,121 @@ if st.session_state.page == "pump":
         ax3.legend()
         st.pyplot(fig3, clear_figure=True)
 
-    with st.expander("📘 Rechenweg & Formeln (ausführlich)", expanded=False):
-        st.markdown(f"""
-**Gegeben (viskos):**  
-- Förderstrom: **Qᵥ = {Q_vis_req:.3f} m³/h**  
-- Förderhöhe: **Hᵥ = {H_vis_req:.3f} m**  
-- Kinem. Viskosität: **ν = {nu:.3f} cSt**  
-- Dichte: **ρ = {rho:.1f} kg/m³**  
+    with st.expander("📘 Rechenweg – Schritt 1: HI-ähnliche Kennzahl B", expanded=False):
+
+        st.markdown("""
+### Ziel dieses Schrittes
+
+Pumpenkennlinien werden in der Regel **für Wasser** angegeben.  
+Wird jedoch ein **viskoses Medium** gefördert (z. B. Öl, Emulsionen, hochviskose Kühlschmierstoffe),
+ändert sich das hydraulische Verhalten der Pumpe deutlich:
+
+- der **Förderstrom sinkt**,  
+- die **Förderhöhe nimmt ab**,  
+- der **Wirkungsgrad verschlechtert sich**,  
+- die **Leistungsaufnahme steigt**.
+
+Um diese Effekte **quantitativ abschätzen** zu können, verwendet das *Hydraulic Institute (HI)*
+eine dimensionslose Kennzahl, mit der entschieden wird,
+**ob und wie stark** eine Viskositätskorrektur notwendig ist.
 
 ---
 
-## Schritt 1: HI-ähnliche Kennzahl B
-Wir nutzen eine pragmatische HI-nahe Kennzahl (in Anlehnung an Hydraulic Institute), um abzuschätzen,
-wie stark Viskosität die Kennlinie beeinflusst.
+### Grundidee der Kennzahl B
 
-- Umrechnung: Q → gpm, H → ft  
-- Formel:  
+Die HI-Kennzahl **B** beschreibt,  
+wie stark sich **viskose Reibungseffekte** gegenüber den idealen (wasserähnlichen) Strömungsverhältnissen auswirken.
 
-\\[
-B = 16.5 \\cdot \\frac{{\\sqrt{{\\nu}}}}{{Q_{{gpm}}^{{0.25}} \\cdot H_{{ft}}^{{0.375}}}}
-\\]
+Dabei fließen drei Einflussgrößen ein:
 
-Ergebnis: **B = {B:.3f}**
+1. **Viskosität des Mediums (ν)**  
+   → je höher die Viskosität, desto stärker die Abweichung vom Wasserbetrieb
 
-Interpretation:  
-- **B < 1** ⇒ geringe Effekte  
-- **B ≥ 1** ⇒ Korrekturfaktoren werden relevant
+2. **Förderstrom der Pumpe (Q)**  
+   → bei kleinen Förderströmen dominieren viskose Verluste
 
----
+3. **Förderhöhe der Pumpe (H)**  
+   → hohe Förderhöhen relativieren viskose Effekte
 
-## Schritt 2: Korrekturfaktoren CH und Cη
-- **CH** reduziert die Förderhöhe auf viskose Bedingungen (bzw. erhöht Rückrechnung auf Wasser)  
-- **Cη** reduziert den Wirkungsgrad
-
-Ergebnis:  
-- **CH = {CH:.4f}**  
-- **Cη = {Ceta:.4f}**
+Die Kennzahl B fasst diese Effekte in **einer einzigen dimensionslosen Zahl** zusammen.
 
 ---
 
-## Schritt 3: Umrechnung viskos → Wasserkennlinie
-Für die Pumpenauswahl wird auf der Wasserkennlinie verglichen.
+### Umrechnung der Größen
 
-- Förderstrom: \\(Q_w = Qᵥ\\) (hier unverändert)  
-- Förderhöhe:  
+Da die ursprüngliche HI-Formulierung auf **US-Einheiten** basiert, werden die Größen intern umgerechnet:
 
-\\[
-H_w = \\frac{{Hᵥ}}{{CH}}
-\\]
+- Förderstrom **Q → gpm** (gallons per minute)  
+- Förderhöhe **H → ft** (feet)  
+- kinematische Viskosität **ν → cSt** (centistokes)
 
-⇒ **Q_w = {Q_water:.3f} m³/h**, **H_w = {H_water:.3f} m**
+Diese Umrechnung erfolgt automatisch im Hintergrund.
 
 ---
 
-## Schritt 4: Pumpenauswahl auf Wasserkennlinie
-Für jede Pumpe wird bei \\(Q_w\\) die Förderhöhe \\(H(Q_w)\\) interpoliert
-und der Abstand zu \\(H_w\\) bewertet.
+### Definition der HI-ähnlichen Kennzahl B
+""")
 
-Gewählt: **{best['id']}**
+    st.latex(r"""
+B = 16.5 \cdot \frac{\sqrt{\nu}}{Q_{gpm}^{0.25} \cdot H_{ft}^{0.375}}
+""")
 
----
+    st.markdown(f"""
+**Bedeutung der Terme:**
 
-## Schritt 5: Betriebspunktleistung (viskos)
-Wellenleistung (physikalisch konsistent):
-
-\\[
-P = \\frac{{\\rho g Q H}}{{\\eta}}
-\\]
-
-mit \\(Q\\) in m³/s: \\(Q = Qᵥ/3600\\)
-
-- \\(\\eta_{{vis}} = \\eta_w \\cdot Cη = {eta_vis_op:.4f}\\)
-- \\(P_{{vis}} = {P_vis_kW:.3f} \\, kW\\)
+- **ν** … kinematische Viskosität des Mediums [cSt]  
+- **Q\_{{gpm}}** … Förderstrom in gpm  
+- **H\_{{ft}}** … Förderhöhe in ft  
+- **16.5** … empirischer Skalierungsfaktor aus HI-Versuchsdaten  
 
 ---
 
-## Schritt 6: Motorreserve und IEC-Stufung
-- Reserve: **{reserve_pct}%**  
-- \\(P_{{Motor,min}} = P_{{vis}} \\cdot (1 + Reserve)\\)  
-- Rundung auf IEC-Stufe ⇒ **{P_motor_kW:.2f} kW**
-    """)
+### Ergebnis für den aktuellen Betriebspunkt
+
+Für die eingegebenen Betriebsdaten ergibt sich:
+
+- **B = {B:.3f}**
+
+---
+
+### Interpretation der Kennzahl B
+
+Die Größe von **B** entscheidet darüber,  
+**ob eine Viskositätskorrektur notwendig ist und wie stark sie ausfällt**:
+
+- **B < 1**  
+  → viskose Effekte sind gering  
+  → Wasserkennlinie ist eine gute Näherung  
+
+- **1 ≤ B < 5**  
+  → viskose Effekte sind spürbar  
+  → Förderhöhe und Wirkungsgrad müssen korrigiert werden  
+
+- **B ≥ 5**  
+  → starke viskose Einflüsse  
+  → deutliche Abweichung von der Wasserkennlinie  
+  → Leistungsbedarf steigt stark an  
+
+Im vorliegenden Fall (**B = {B:.2f}**) befinden wir uns somit im Bereich  
+**deutlich relevanter viskoser Effekte**.
+
+---
+
+### Konsequenz für die weitere Berechnung
+
+Auf Basis der Kennzahl **B** werden in den folgenden Schritten:
+
+- Korrekturfaktoren für  
+  - Förderstrom (**C<sub>Q</sub>**),  
+  - Förderhöhe (**C<sub>H</sub>**),  
+  - Wirkungsgrad (**C<sub>η</sub>**)  
+
+ermittelt und auf die Wasserkennlinie angewendet.
+
+Damit wird sichergestellt,  
+dass die Pumpenauswahl **realistisch** und **betriebssicher** erfolgt.
+""")
+
 
 # =========================================================
 # PAGE 2: Mehrphase
