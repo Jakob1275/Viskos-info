@@ -690,8 +690,9 @@ Durch dieses Vorgehen wird sichergestellt, dass:
 - eine **Überlastung des Motors** vermieden wird und  
 - die Auslegung insgesamt **realistisch und betriebssicher** ist.
 
-Die Kennzahl **B** bildet damit die **Brücke zwischen idealer Kennlinie und realem Anlagenbetrieb**.
-""")
+Die Kennzahl **B** bildet damit die **Brücke zwischen idealer Kennlinie und realem Anlagenbetrieb**. """) 
+
+
 
 # =========================================================
 # PAGE 2: Mehrphase
