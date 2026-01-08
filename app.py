@@ -634,7 +634,7 @@ if st.session_state.page == "pump":
         st.pyplot(fig3, clear_figure=True)
 
     with st.expander("📘 Rechenweg & Formeln (ausführlich)", expanded=False):
-    st.markdown(f"""
+        st.markdown(f"""
 **Gegeben (viskos):**  
 - Förderstrom: **Qᵥ = {Q_vis_req:.3f} m³/h**  
 - Förderhöhe: **Hᵥ = {H_vis_req:.3f} m**  
