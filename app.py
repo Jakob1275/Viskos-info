@@ -925,17 +925,17 @@ Wir bestimmen das maximal lösliche Gasvolumen bezogen auf 1 Liter Flüssigkeit 
 
 1) Henry:
 \\[
-C = \\frac{p_{partial}}{H(T)}
+C = \\frac{{p_{{partial}}}}{{H(T)}}
 \\]
 
 2) Ideales Gas (Betriebsbedingungen):
 \\[
-V_{{molar}} = \\frac{RT}{p}
+V_{{molar}} = \\frac{{RT}}{{p}}
 \\]
 
 3) Gasvolumen pro Liter Flüssigkeit:
 \\[
-\\frac{V_{{gas}}}{V_{{liq}}} = C \\cdot V_{{molar}}
+\\frac{{V_{{gas}}}}{{V_{{liq}}}} = C \\cdot V_{{molar}}
 \\]
 
 Ergebnis am Saugpunkt (p_s, T):
@@ -943,7 +943,7 @@ Ergebnis am Saugpunkt (p_s, T):
 
 Zusätzlich für die **diagonale Darstellung** in der Grafik: Umrechnung auf Normalvolumen:
 \\[
-V_N = V_{{oper}} \\cdot \\frac{p_{{oper}}}{p_N} \\cdot \\frac{T_N}{T_{{oper}}}
+V_N = V_{{oper}} \\cdot \\frac{{p_{{oper}}}}{{p_N}} \\cdot \\frac{{T_N}}{{T_{{oper}}}}
 \\]
 
 ⇒ **Löslichkeit (cm³N/L) am Saugpunkt = {dissolved_cm3N_L:.2f}**
@@ -955,7 +955,7 @@ Gegeben GVF_in am Saugpunkt. Wir setzen 1 L Flüssigkeit:
 
 - Gesamt-Gasvolumen (aus GVF):
 \\[
-V_{{gas,total}} = \\frac{GVF}{1-GVF} \\cdot V_{{liq}}
+V_{{gas,total}} = \\frac{{GVF}}{{1-GVF}} \\cdot V_{{liq}}
 \\]
 
 - Gelöst max:
@@ -970,7 +970,7 @@ V_{{gas,free}} = \\max(0, V_{{gas,total}} - V_{{gas,diss,max}})
 
 - Freier GVF:
 \\[
-GVF_{{free}} = \\frac{V_{{gas,free}}}{V_{{gas,free}} + V_{{liq}}}
+GVF_{{free}} = \\frac{{V_{{gas,free}}}}{{V_{{gas,free}} + V_{{liq}}}}
 \\]
 
 ⇒ **GVF_free = {gvf_free:.2f}%**
@@ -986,7 +986,8 @@ Q \\sim n, \\quad \\Delta p \\sim n^2, \\quad P \\sim n^3
 \\]
 
 Die Bisektion sucht n/n0, so dass ∆p(Q_req) = ∆p_req erfüllt wird (sofern möglich).
-        """)
+    """)
+
 
 # =========================================================
 # PAGE 3: ATEX
