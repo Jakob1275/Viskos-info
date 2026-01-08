@@ -651,19 +651,19 @@ Abhängig von der Größe von **B** werden in den folgenden Schritten
 Konkret werden auf Basis von **B** folgende Korrekturfaktoren ermittelt:
 """)
 
-st.latex(r"""
+        st.latex(r"""
 C_Q \quad \text{(Korrekturfaktor für den Förderstrom)}
 """)
 
-st.latex(r"""
+        st.latex(r"""
 C_H \quad \text{(Korrekturfaktor für die Förderhöhe)}
 """)
 
-st.latex(r"""
+        st.latex(r"""
 C_\eta \quad \text{(Korrekturfaktor für den Wirkungsgrad)}
 """)
 
-st.markdown("""
+        st.markdown("""
 Diese Faktoren beschreiben, **wie stark** sich das reale Betriebsverhalten
 der Pumpe bei viskosen Medien von der idealisierten Wasserkennlinie unterscheidet.
 
@@ -690,7 +690,9 @@ Durch dieses Vorgehen wird sichergestellt, dass:
 - eine **Überlastung des Motors** vermieden wird und  
 - die Auslegung insgesamt **realistisch und betriebssicher** ist.
 
-Die Kennzahl **B** bildet damit die **Brücke zwischen idealer Kennlinie und realem Anlagenbetrieb**. """) 
+Die Kennzahl **B** bildet damit die **Brücke zwischen idealer Kennlinie und realem Anlagenbetrieb**. 
+
+""") 
 
 
 
