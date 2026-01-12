@@ -913,7 +913,7 @@ def run_atex_selection():
             - **Geeignet für Zone:** {', '.join(map(str, selected_motor['zone_suitable']))}
             """)
 
-        # Export
+        # Export mit korrigierter f-String
         if st.button("ATEX-Dokumentation exportieren"):
             html = f"""
             <!DOCTYPE html>
@@ -942,4 +942,29 @@ def run_atex_selection():
                 <h2>Ergebnisse</h2>
                 <table>
                     <tr><th>Parameter</th><th>Wert</th></tr>
-                    <tr><td>Erforderliche Wellenleistung</td><td>{P_req:.2f} kW</"""
+                    <tr><td>Erforderliche Wellenleistung</td><td>{P_req:.2f} kW</td></tr>
+                    <tr><td>Mindestleistung (+15%)</td><td>{P_motor_min:.2f} kW</td></tr>
+                    <tr><td>IEC Motorgröße</td><td>{P_iec:.2f} kW</td></tr>
+                    <tr><td>Gewählter Motor</td><td>{selected_motor['id']}</td></tr>
+                    <tr><td>Kennzeichnung</td><td>{selected_motor['marking']}</td></tr>
+                    <tr><td>Max. Oberflächentemperatur</td><td>{selected_motor['t_max_surface']:.1f}°C</td></tr>
+                    <tr><td>Temperaturabstand</td><td>{selected_motor['t_max_surface'] - T_medium:.1f} K</td></tr>
+                    <tr><td>Kategorie</td><td>{selected_motor['category']}</td></tr>
+                    <tr><td>Wirkungsgradklasse</td><td>{selected_motor.get('efficiency_class', 'N/A')}</td></tr>
+                    <tr><td>Geeignet für Zone</td><td>{', '.join(map(str, selected_motor['zone_suitable']))}</td></tr>
+                </table>
+
+                <h2>Hinweise</h2>
+                <p>Diese Auslegung dient als Grundlage für die Motorauswahl. Bitte prüfen Sie die Konformität mit den aktuellen ATEX-Richtlinien (2014/34/EU) und den relevanten Normen (EN 60079).</p>
+            </body>
+            </html>
+            """
+            st.download_button(
+                label="HTML-Dokumentation herunterladen",
+                data=html,
+                file_name=f"ATEX_Auslegung_{datetime.now().strftime('%Y%m%d')}.html",
+                mime="text/html"
+            )
+
+    except Exception as e:
+        st.error(f"Fehler in der ATEX-Auslegung: {e}")
