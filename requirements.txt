@@ -1,3 +1,6 @@
 streamlit
 matplotlib
 numpy
+io
+datetime
+scipy.interpolate
