@@ -14,6 +14,9 @@ R_BAR_L = 0.08314462618  # bar·L/(mol·K) ideales Gas
 P_N_BAR = 1.01325
 T_N_K = 273.15  # 0°C als Norm (passt zu typischen Ncm³-Angaben)
 
+# Basisdrehzahl (Default), wenn nicht pumpenspezifisch angegeben
+N0_RPM_DEFAULT = 2900
+
 # =========================
 # Pumpenkennlinien (Einphasen) - Beispiel
 # =========================
@@ -50,6 +53,7 @@ MPH_PUMPS = [
         "Q_max_m3h": 25,
         "dp_max_bar": 9,
         "GVF_max": 0.4,  # 40%
+        "n0_rpm": 2900,
         "curves_dp_vs_Q": {
             0:  {"Q": [0, 5, 10, 15, 20, 25], "dp": [8.6, 8.5, 8.2, 7.6, 6.8, 5.0]},
             5:  {"Q": [0, 5, 10, 15, 20, 25], "dp": [8.4, 8.3, 8.0, 7.3, 6.3, 4.6]},
@@ -71,6 +75,7 @@ MPH_PUMPS = [
         "Q_max_m3h": 50,
         "dp_max_bar": 20,
         "GVF_max": 0.4,
+        "n0_rpm": 2900,
         "curves_dp_vs_Q": {
             0:  {"Q": [0, 10, 20, 30, 40, 50], "dp": [18.8, 18.5, 17.8, 16.0, 13.5, 10.0]},
             5:  {"Q": [0, 10, 20, 30, 40, 50], "dp": [18.2, 18.0, 17.0, 15.2, 12.6, 9.2]},
@@ -92,6 +97,7 @@ MPH_PUMPS = [
         "Q_max_m3h": 100,
         "dp_max_bar": 30,
         "GVF_max": 0.4,
+        "n0_rpm": 2900,
         "curves_dp_vs_Q": {
             0:  {"Q": [0, 20, 40, 60, 80, 100], "dp": [28.5, 28.0, 26.5, 23.5, 19.0, 14.0]},
             5:  {"Q": [0, 20, 40, 60, 80, 100], "dp": [27.8, 27.0, 25.3, 22.0, 17.8, 13.0]},
@@ -157,7 +163,7 @@ def m3h_to_lmin(m3h):
 
 def interp_clamped(x, xs, ys):
     if len(xs) < 2:
-        return ys[0]
+        return ys[0] if ys else 0.0
     if x <= xs[0]:
         return ys[0]
     if x >= xs[-1]:
@@ -199,13 +205,11 @@ def viscosity_correction_factors(B):
 def viscous_to_water_point(Q_vis, H_vis, nu_cSt):
     B = compute_B_HI(Q_vis, H_vis, nu_cSt)
     CH, Ceta = viscosity_correction_factors(B)
-    # Vereinfachung: Q bleibt gleich, H wird auf Wasserkennlinie "hochgerechnet"
-    return {"B": B, "CH": CH, "Ceta": Ceta, "Q_water": Q_vis, "H_water": H_vis / CH}
+    return {"B": B, "CH": CH, "Ceta": Ceta, "Q_water": Q_vis, "H_water": H_vis / max(CH, 1e-9)}
 
 def water_to_viscous_point(Q_water, H_water, eta_water, nu_cSt):
     B = compute_B_HI(Q_water, H_water, nu_cSt)
     CH, Ceta = viscosity_correction_factors(B)
-    # Realer Betrieb: H sinkt (CH < 1), eta sinkt (Ceta < 1)
     return Q_water, H_water * CH, max(1e-6, eta_water * Ceta)
 
 def generate_viscous_curve(pump, nu_cSt, rho):
@@ -283,44 +287,40 @@ def solubility_diagonal_curve_cm3N_per_L(gas, T_celsius, p_max=14, y_gas=1.0):
     sol_cm3N_L = [gas_solubility_cm3N_per_L(gas, p, T_celsius, y_gas=y_gas) for p in pressures]
     return pressures, sol_cm3N_L
 
-def gvf_total_to_Vgas_oper_L_per_L(gvf_pct):
-    """
-    Setze V_liq = 1 L.
-    GVF = V_gas / (V_gas + V_liq) -> V_gas = GVF/(1-GVF) * V_liq
-    """
-    gvf = clamp(gvf_pct / 100.0, 0.0, 0.999999)
-    return gvf / (1.0 - gvf) * 1.0
+# =========================
+# Overlay / Folien-Logik: 10% ↔ 100 cm³N/L
+# =========================
+def cm3N_per_L_to_LN_per_L(cm3N_per_L):
+    return cm3N_per_L / 1000.0
 
-def free_gvf_from_total_and_dissolved_oper(gvf_total_pct, dissolved_oper_L_per_L):
+def solubility_capacity_LminN(gas, p_bar_abs, T_c, Q_liq_m3h, y_gas=1.0):
+    """Max. lösbarer Gasstrom als Normvolumen [L_N/min] bei gegebenem Q_liq."""
+    sol_cm3N_L = gas_solubility_cm3N_per_L(gas, p_bar_abs, T_c, y_gas=y_gas)
+    sol_LN_L = cm3N_per_L_to_LN_per_L(sol_cm3N_L)  # L_N/L
+    return sol_LN_L * m3h_to_lmin(Q_liq_m3h)
+
+def total_gas_cm3N_per_L_from_gvf_like(gvf_pct):
     """
-    gelöstes Maximum (operativ) wird abgezogen:
-    Vgas_free_oper = max(0, Vgas_total_oper - Vgas_diss_max_oper)
-    und in freies GVF zurückgerechnet.
+    Mapping wie in der Folie:
+    10% ≙ 100 cm³N/L  ->  1% ≙ 10 cm³N/L
     """
-    Vliq = 1.0
-    Vgas_total = gvf_total_to_Vgas_oper_L_per_L(gvf_total_pct)
-    Vgas_diss = max(dissolved_oper_L_per_L, 0.0) * Vliq
-    Vgas_free = max(0.0, Vgas_total - Vgas_diss)
+    return max(0.0, gvf_pct) * 10.0
 
-    gvf_free = Vgas_free / (Vgas_free + Vliq)
-    return 100.0 * gvf_free, Vgas_total, Vgas_diss, Vgas_free
-
-def gvf_from_airflow_Nm3h(Q_air_Nm3h, Q_liq_m3h, p_suction_bar_abs, T_celsius):
+def free_gas_flow_from_total_cm3N_per_L(total_cm3N_L, gas, p_bar_abs, T_c, Q_liq_m3h, y_gas=1.0):
     """
-    Umrechnung Nm³/h Luft (Norm) -> GVF_in am Saugpunkt.
-
-    1) V_N,air [m³/h] gegeben
-    2) in operatives Gasvolumen bei p_s, T:
-       V_oper = V_N * (p_N/p_oper) * (T_oper/T_N)
-    3) GVF = V_oper / (V_oper + Q_liq)
+    Gesamtgasmenge (als Normvolumen cm³N/L) ist konstant (z.B. definiert an der Druckseite / durch Recycling).
+    Freies Gas entsteht, wenn total > Löslichkeit(p).
+    Rückgabe: freier Gasstrom [L_N/min]
     """
-    Q_liq = max(Q_liq_m3h, 1e-9)
+    sol_cm3N_L = gas_solubility_cm3N_per_L(gas, p_bar_abs, T_c, y_gas=y_gas)
+    free_cm3N_L = max(0.0, total_cm3N_L - sol_cm3N_L)
+    free_LN_L = free_cm3N_L / 1000.0
+    return free_LN_L * m3h_to_lmin(Q_liq_m3h)
 
-    T_oper_K = T_celsius + 273.15
-    V_oper_m3h = Q_air_Nm3h * (P_N_BAR / max(p_suction_bar_abs, 1e-9)) * (T_oper_K / T_N_K)
-
-    gvf = V_oper_m3h / (V_oper_m3h + Q_liq)
-    return 100.0 * gvf, V_oper_m3h
+def curve_free_gas_LminN(total_cm3N_L, gas, T_c, Q_liq_m3h, p_min=0.1, p_max=14, n=140, y_gas=1.0):
+    ps = linspace(p_min, p_max, n)
+    ys = [free_gas_flow_from_total_cm3N_per_L(total_cm3N_L, gas, p, T_c, Q_liq_m3h, y_gas=y_gas) for p in ps]
+    return ps, ys
 
 # =========================
 # Mehrphase: Affinität (Q~n, Δp~n², P~n³) korrekt über Q_base
@@ -372,6 +372,8 @@ def choose_best_mph_pump(pumps, Q_req, dp_req, gvf_free_req_pct, dp_margin=0.05)
         if Q_req > pump["Q_max_m3h"] * 1.1:
             continue
 
+        n0 = pump.get("n0_rpm", N0_RPM_DEFAULT)
+
         gvf_key = choose_gvf_curve_key_worstcase(pump["curves_dp_vs_Q"], gvf_free_req_pct)
         curve = pump["curves_dp_vs_Q"][gvf_key]
         power_curve = pump["power_kW_vs_Q"][gvf_key]
@@ -387,7 +389,8 @@ def choose_best_mph_pump(pumps, Q_req, dp_req, gvf_free_req_pct, dp_margin=0.05)
                 score = abs(dp_avail_nom - dp_req) + abs(gvf_key - gvf_free_req_pct) * 0.25
                 candidates.append({
                     "pump": pump, "gvf_curve": gvf_key, "dp_available": dp_avail_nom,
-                    "P_required": P_nom, "n_ratio": 1.0, "mode": "Nenndrehzahl",
+                    "P_required": P_nom, "n_ratio": 1.0, "n_abs_rpm": float(n0),
+                    "mode": f"Nenndrehzahl {n0:.0f} rpm",
                     "dp_reserve": dp_avail_nom - dp_req, "score": score
                 })
 
@@ -400,13 +403,13 @@ def choose_best_mph_pump(pumps, Q_req, dp_req, gvf_free_req_pct, dp_margin=0.05)
                 P_base = interp_clamped(Q_base, power_curve["Q"], power_curve["P"])
                 P_scaled = P_base * (n_ratio ** 3)
 
-                # WICHTIG: als "gültig" akzeptieren wir, wenn dp_scaled >= dp_req (numerische Toleranz)
                 if dp_scaled + 1e-6 >= dp_req:
+                    n_abs = n0 * n_ratio
                     score = abs(1.0 - n_ratio) * 6.0 + abs(gvf_key - gvf_free_req_pct) * 0.25
                     candidates.append({
                         "pump": pump, "gvf_curve": gvf_key, "dp_available": dp_scaled,
-                        "P_required": P_scaled, "n_ratio": n_ratio,
-                        "mode": f"Drehzahl {n_ratio*100:.1f}%",
+                        "P_required": P_scaled, "n_ratio": n_ratio, "n_abs_rpm": float(n_abs),
+                        "mode": f"Drehzahl {n_abs:.0f} rpm",
                         "dp_reserve": dp_scaled - dp_req, "score": score
                     })
 
@@ -447,22 +450,28 @@ def sidebar_inputs_mph():
     p_suction = st.number_input("Saugdruck p_s [bar abs]", 0.1, 200.0, 2.0, 0.1)
     p_discharge = st.number_input("Druckseite p_d [bar abs]", 0.1, 400.0, 7.0, 0.1)
 
-    dp_req = max(0.0, (p_discharge - p_suction))  # ohne Δp_loss (wie gewünscht)
+    dp_req = max(0.0, (p_discharge - p_suction))  # ohne Δp_loss
 
     st.divider()
-    st.subheader("Gasanteil am Saugpunkt (Input wählbar)")
-    mode = st.radio("Eingabeart", ["GVF_in [%]", "Q_air_N [Nm³/h]"], index=0)
+    st.subheader("Gasdefinition (Druckseite)")
 
-    gvf_in_pct = None
-    Q_air_Nm3h = None
-    V_air_oper_m3h = None
+    gas_mode = st.radio(
+        "Wie ist das Gas vorgegeben?",
+        [
+            "GVF_out [%] (an Druckseite im Wasser gelöst)",
+            "Recyclingstrom Q_rec [m³/h] (gesättigt an Druckseite)"
+        ],
+        index=0
+    )
 
-    if mode == "GVF_in [%]":
-        gvf_in_pct = st.slider("Gesamt-GVF_in [%] (am Saugpunkt)", 0.0, 40.0, 10.0, 0.1)
+    gvf_out_pct = None
+    Q_rec_m3h = None
+
+    if gas_mode.startswith("GVF_out"):
+        gvf_out_pct = st.slider("GVF_out [%] (gelöst bei p_d)", 0.0, 40.0, 10.0, 0.1)
     else:
-        Q_air_Nm3h = st.number_input("Luftstrom Q_air,N [Nm³/h]", 0.0, 200.0, 3.0, 0.1)
-        gvf_in_pct, V_air_oper_m3h = gvf_from_airflow_Nm3h(Q_air_Nm3h, Q_req, p_suction, temperature)
-        st.caption(f"→ daraus berechnet: GVF_in ≈ {gvf_in_pct:.2f}% (bei p_s,T)")
+        Q_rec_m3h = st.number_input("Recyclingstrom Q_rec [m³/h] (mit gelöstem Gas)", 0.0, 150.0, 3.0, 0.1)
+        st.caption("Annahme: Recyclingstrom ist bei p_d,T gesättigt (max. löslich). Frischanteil ist entgast.")
 
     st.divider()
     st.subheader("Darstellung / Logik")
@@ -470,7 +479,7 @@ def sidebar_inputs_mph():
     only_dissolved_allowed = st.checkbox("Nur gelöst zulässig (wie Folie: 'nicht möglich')", value=False)
 
     return (gas_medium, temperature, Q_req, p_suction, p_discharge, dp_req,
-            mode, gvf_in_pct, Q_air_Nm3h, V_air_oper_m3h, show_temp_band, only_dissolved_allowed)
+            gas_mode, gvf_out_pct, Q_rec_m3h, show_temp_band, only_dissolved_allowed)
 
 # =========================
 # Streamlit App
@@ -534,11 +543,12 @@ if st.session_state.page == "pump":
     st.success(f"**Gewählte Pumpe: {best['id']}**")
 
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Q (viskos)", f"{Q_vis_req:.2f} m³/h", f"{m3h_to_lmin(Q_vis_req):.1f} L/min")
+    col1.metric("Q (viskos)", f"{Q_vis_req:.2f} m³/h")
     col2.metric("H (viskos)", f"{H_vis_req:.2f} m")
     col3.metric("η (viskos)", f"{eta_vis:.3f}")
     col4.metric("P Welle (viskos)", f"{P_vis_kW:.2f} kW")
     col5.metric("IEC-Motor (+Reserve)", f"{P_motor_kW:.2f} kW", f"+{reserve_pct}%")
+    st.caption(f"Q (viskos) = {m3h_to_lmin(Q_vis_req):.1f} L/min")
 
     if not best["in_range"]:
         st.warning(f"⚠️ Q außerhalb Kennlinie ({min(p['Qw'])}…{max(p['Qw'])} m³/h). "
@@ -546,6 +556,11 @@ if st.session_state.page == "pump":
 
     # Kennlinien viskos generieren
     Q_vis_curve, H_vis_curve, eta_vis_curve, P_vis_curve = generate_viscous_curve(p, nu, rho)
+
+    # Betriebspunkt auf der Kennlinie (viskos) für korrekte BP-Visualisierung
+    H_vis_on_curve = interp_clamped(Q_vis_req, Q_vis_curve, H_vis_curve)
+    eta_vis_on_curve = interp_clamped(Q_vis_req, Q_vis_curve, eta_vis_curve)
+    P_vis_on_curve = interp_clamped(Q_vis_req, Q_vis_curve, P_vis_curve)
 
     # Wasser-Punkt auf Kennlinie
     H_water_op = interp_clamped(Q_water, p["Qw"], p["Hw"])
@@ -560,9 +575,16 @@ if st.session_state.page == "pump":
         ax1.plot(p["Qw"], p["Hw"], "o-", linewidth=2, label=f"{p['id']} (Wasser)")
         ax1.plot(Q_vis_curve, H_vis_curve, "s--", linewidth=2.5, label=f"{p['id']} (viskos)")
         ax1.scatter([Q_water], [H_water_op], marker="^", s=150, edgecolors="black",
-                    linewidths=2, label="BP (Wasser auf Kennlinie)", zorder=5)
-        ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=200, linewidths=3,
-                    label="BP (viskos)", zorder=5)
+                    linewidths=2, label="BP (Wasser auf Kennlinie)", zorder=6)
+
+        # BP viskos wirklich auf Kennlinie (X)
+        ax1.scatter([Q_vis_req], [H_vis_on_curve], marker="x", s=200, linewidths=3,
+                    label="BP (viskos auf Kennlinie)", zorder=7)
+
+        # optional: Sollpunkt (viskos) als Kreis
+        ax1.scatter([Q_vis_req], [H_vis_req], marker="o", s=80, edgecolors="black",
+                    linewidths=1.5, label="Sollpunkt (viskos)", zorder=6, alpha=0.8)
+
         ax1.set_xlabel("Q [m³/h]")
         ax1.set_ylabel("H [m]")
         ax1.set_title("Q-H Kennlinien")
@@ -575,9 +597,13 @@ if st.session_state.page == "pump":
         ax2.plot(p["Qw"], p["eta"], "o-", linewidth=2, label=f"{p['id']} (Wasser)")
         ax2.plot(Q_vis_curve, eta_vis_curve, "s--", linewidth=2.5, label=f"{p['id']} (viskos)")
         ax2.scatter([Q_water], [eta_water], marker="^", s=150, edgecolors="black",
-                    linewidths=2, label="η (Wasser)", zorder=5)
-        ax2.scatter([Q_vis_req], [eta_vis], marker="x", s=200, linewidths=3,
-                    label="η (viskos)", zorder=5)
+                    linewidths=2, label="η (Wasser)", zorder=6)
+
+        ax2.scatter([Q_vis_req], [eta_vis_on_curve], marker="x", s=200, linewidths=3,
+                    label="η (viskos auf Kennlinie)", zorder=7)
+        ax2.scatter([Q_vis_req], [eta_vis], marker="o", s=80, edgecolors="black",
+                    linewidths=1.5, label="η Soll (viskos)", zorder=6, alpha=0.8)
+
         ax2.set_xlabel("Q [m³/h]")
         ax2.set_ylabel("η [-]")
         ax2.set_title("Q-η Kennlinien")
@@ -590,9 +616,13 @@ if st.session_state.page == "pump":
         ax3.plot(p["Qw"], p["Pw"], "o-", linewidth=2, label=f"{p['id']} (Wasser)")
         ax3.plot(Q_vis_curve, P_vis_curve, "s--", linewidth=2.5, label=f"{p['id']} (viskos)")
         ax3.scatter([Q_water], [P_water_kW_op], marker="^", s=150, edgecolors="black",
-                    linewidths=2, label="BP (Wasser)", zorder=5)
-        ax3.scatter([Q_vis_req], [P_vis_kW], marker="x", s=200, linewidths=3,
-                    label="BP (viskos)", zorder=5)
+                    linewidths=2, label="BP (Wasser)", zorder=6)
+
+        ax3.scatter([Q_vis_req], [P_vis_on_curve], marker="x", s=200, linewidths=3,
+                    label="BP (viskos auf Kennlinie)", zorder=7)
+        ax3.scatter([Q_vis_req], [P_vis_kW], marker="o", s=80, edgecolors="black",
+                    linewidths=1.5, label="Sollpunkt (viskos)", zorder=6, alpha=0.8)
+
         ax3.set_xlabel("Q [m³/h]")
         ax3.set_ylabel("P [kW]")
         ax3.set_title("Q-P Kennlinien")
@@ -602,106 +632,64 @@ if st.session_state.page == "pump":
 
     with st.expander("📘 Rechenweg (ausführlich)", expanded=False):
         st.markdown("""
-### Schritt 1: HI-ähnliche Kennzahl B (Warum überhaupt?)
-Bei viskosen Medien (z. B. Öl, Glykol) steigt die innere Reibung. Dadurch:
-- sinken Förderhöhe und Förderstrom bei gleicher Drehzahl,
-- sinkt der Wirkungsgrad,
-- steigt die erforderliche Wellenleistung.
-
-Damit wir trotzdem eine Pumpe aus **Wasserkennlinien** auswählen können, wird zuerst bewertet,
-**wie stark** Viskositätseffekte sind. Das macht die Kennzahl **B**.
-
+### Schritt 1: HI-ähnliche Kennzahl B
+Bei viskosen Medien steigt die innere Reibung. Dadurch sinken Förderhöhe und Wirkungsgrad, die Leistung steigt.
+Für eine Auswahl auf Wasserkennlinien verwenden wir die Kennzahl **B**.
 """)
-        st.markdown("**Formel (HI-ähnlich, pragmatisch):**")
         st.latex(r"B = 16.5 \cdot \frac{\sqrt{\nu}}{Q_{gpm}^{0.25} \cdot H_{ft}^{0.375}}")
-        st.markdown("""
-- \(\nu\) in **cSt**
-- \(Q_{gpm}\) ist der Förderstrom in **gpm**
-- \(H_{ft}\) ist die Förderhöhe in **ft**
-
-**Interpretation:**
-- **B < 1** → Viskositätseffekte klein → Wasserkennlinie passt fast
-- **B ≥ 1** → Effekte relevant → Korrekturfaktoren werden angewendet
-""")
-        st.markdown("**Ergebnis in deinem Betriebspunkt:**")
         st.markdown(f"- B = **{B:.3f}**")
-
         st.markdown("---")
-        st.markdown("""
-### Schritt 2: Korrekturfaktoren aus B
-Aus B werden (vereinfacht) zwei Faktoren abgeleitet:
-
-- \(C_H\): reduziert die **Förderhöhe** (typisch < 1 bei viskos)
-- \(C_\eta\): reduziert den **Wirkungsgrad** (typisch < 1 bei viskos)
-
-""")
-        st.latex(r"C_H = \text{f}(B)\quad,\qquad C_\eta = \text{f}(B)")
-        st.markdown(f"- \(C_H\) = **{CH:.3f}**  → H_vis = H_w · C_H")
-        st.markdown(f"- \(C_\\eta\) = **{Ceta:.3f}** → η_vis = η_w · C_η")
-
+        st.markdown("### Schritt 2: Korrekturfaktoren")
+        st.latex(r"H_{vis} = H_w \cdot C_H \quad,\qquad \eta_{vis} = \eta_w \cdot C_\eta")
+        st.markdown(f"- C_H = **{CH:.3f}**, C_η = **{Ceta:.3f}**")
         st.markdown("---")
-        st.markdown("""
-### Schritt 3: Umrechnung viskos → Wasserkennlinie (für die Auswahl)
-Wir kennen den gewünschten viskosen Betriebspunkt \((Q_v, H_v)\).
-Für die Auswahl auf Wasserkennlinie wird auf einen äquivalenten Wasserpunkt umgerechnet:
-
-- \(Q_w = Q_v\) (hier pragmatisch unverändert)
-- \(H_w = \frac{H_v}{C_H}\)  (weil bei viskos die Höhe sinkt)
-
-""")
-        st.latex(r"Q_w = Q_v")
-        st.latex(r"H_w = \frac{H_v}{C_H}")
-        st.markdown(f"- \(Q_w\) = **{Q_water:.2f} m³/h**")
-        st.markdown(f"- \(H_w\) = **{H_water:.2f} m**")
-
+        st.markdown("### Schritt 3: Umrechnung viskos → Wasserkennlinie")
+        st.latex(r"H_w = \frac{H_{vis}}{C_H}")
+        st.markdown(f"- Q_w = **{Q_water:.2f} m³/h**, H_w = **{H_water:.2f} m**")
         st.markdown("---")
-        st.markdown("""
-### Schritt 4: Auswahl + Leistung
-1) Wähle die Pumpe, deren Wasserkennlinie bei \(Q_w\) möglichst nahe an \(H_w\) liegt.  
-2) Rechne den Betriebspunkt wieder zurück auf viskos:
-- \(H_v = H_w \cdot C_H\)
-- \(\eta_v = \eta_w \cdot C_\eta\)
-
-3) Wellenleistung:
-""")
-        st.latex(r"P_{hyd} = \rho g \, Q \, H")
-        st.latex(r"P_{shaft} = \frac{P_{hyd}}{\eta_v}")
-
-        st.markdown(f"- \(P_{{hyd}}\) = **{P_hyd_W:.0f} W**")
-        st.markdown(f"- \(P_{{shaft}}\) = **{P_vis_kW:.2f} kW**")
-        st.markdown(f"- Motor (IEC, +Reserve) = **{P_motor_kW:.2f} kW**")
+        st.markdown("### Schritt 4: Leistung")
+        st.latex(r"P_{hyd} = \rho g Q H \quad,\qquad P_{shaft} = \frac{P_{hyd}}{\eta_{vis}}")
+        st.markdown(f"- P_hyd = **{P_hyd_W:.0f} W**, P_shaft = **{P_vis_kW:.2f} kW**")
 
 # =========================================================
 # PAGE 2: Mehrphase
 # =========================================================
 elif st.session_state.page == "mph":
-    st.subheader("⚗️ Mehrphasen: Löslichkeit (p,T) + GVF + Δp-Kennlinien + Auswahl")
+    st.subheader("⚗️ Mehrphasen: Gasdefinition Druckseite + Löslichkeit + Δp-Kennlinien + Overlay")
 
     with st.sidebar:
         (gas_medium, temperature, Q_req, p_suction, p_discharge, dp_req,
-         mode, gvf_in, Q_air_Nm3h, V_air_oper_m3h, show_temp_band, only_dissolved_allowed) = sidebar_inputs_mph()
+         gas_mode, gvf_out_pct, Q_rec_m3h, show_temp_band, only_dissolved_allowed) = sidebar_inputs_mph()
 
-    # y_gas fix = 1.0 (wie du wolltest)
-    y_gas = 1.0
+    y_gas = 1.0  # wie gewünscht
 
-    # 1) Löslichkeit am Saugpunkt (operativ) und als Normvolumen (für diagonale Darstellung)
-    dissolved_oper_L_per_L = gas_solubility_L_per_L_oper(gas_medium, p_suction, temperature, y_gas=y_gas)
-    dissolved_cm3N_L = gas_solubility_cm3N_per_L(gas_medium, p_suction, temperature, y_gas=y_gas)
+    # Löslichkeit an Saug- und Druckseite (cm³N/L)
+    sol_s_cm3N_L = gas_solubility_cm3N_per_L(gas_medium, p_suction, temperature, y_gas=y_gas)
+    sol_d_cm3N_L = gas_solubility_cm3N_per_L(gas_medium, p_discharge, temperature, y_gas=y_gas)
 
-    # 2) GVF_in -> freies Gas (Worst Case)
-    gvf_free, Vgas_total_oper, Vgas_diss_oper, Vgas_free_oper = free_gvf_from_total_and_dissolved_oper(gvf_in, dissolved_oper_L_per_L)
+    # Gesamtgas als Normvolumen cm³N/L (konstant, definiert durch Druckseite / Recycling)
+    if gas_mode.startswith("GVF_out"):
+        total_cm3N_L = total_gas_cm3N_per_L_from_gvf_like(gvf_out_pct)  # 10% -> 100 cm³N/L
+        not_solvable_at_discharge = total_cm3N_L > (sol_d_cm3N_L + 1e-9)
+    else:
+        # Recycling: nur der Recyclinganteil trägt Gas (gesättigt bei p_d)
+        Q_rec = max(0.0, min(float(Q_rec_m3h), float(Q_req)))
+        frac = 0.0 if Q_req <= 1e-9 else (Q_rec / Q_req)
+        total_cm3N_L = sol_d_cm3N_L * frac
+        not_solvable_at_discharge = False
 
-    # "wie Folie": wenn nur gelöst zulässig und GVF_in > löslich -> nicht möglich
-    # Dazu vergleichen wir Gasmenge aus GVF_in (operativ) gegen gelöstes Maximum (operativ).
-    not_solvable = Vgas_total_oper > (Vgas_diss_oper + 1e-12)
+    # Freies Gas am Saugpunkt
+    free_s_cm3N_L = max(0.0, total_cm3N_L - sol_s_cm3N_L)
 
-    if only_dissolved_allowed and not_solvable:
-        st.error("❌ Nicht möglich im Sinne der Folie: Der eingestellte Gasanteil ist am Saugpunkt nicht vollständig löslich.")
-        st.info("Wenn du trotzdem weiter auslegen willst (Worst Case über freie Gasphase), deaktiviere 'Nur gelöst zulässig'.")
-        # Trotzdem die Grafiken zeigen, aber keine Pumpenauswahl.
+    # Für Pumpenkennlinien: GVF_free[%] grob aus Folienmapping
+    gvf_free_req_pct = free_s_cm3N_L / 10.0
+
+    not_solvable_at_suction = free_s_cm3N_L > 1e-9
+
+    if only_dissolved_allowed and not_solvable_at_suction:
         best = None
     else:
-        best = choose_best_mph_pump(MPH_PUMPS, Q_req, dp_req, gvf_free)
+        best = choose_best_mph_pump(MPH_PUMPS, Q_req, dp_req, gvf_free_req_pct)
 
     # =========================
     # Plot 1+2 (oben): diagonale Löslichkeit + Δp-Kennlinien
@@ -722,11 +710,14 @@ elif st.session_state.page == "mph":
                  color=color_cycle[i % len(color_cycle)],
                  label=f"Löslichkeit {gas_medium} {T:.0f}°C (cm³N/L)")
 
-    ax1.scatter([p_suction], [dissolved_cm3N_L], s=180, marker="o",
-                edgecolors="black", linewidths=2, label="Saugpunkt (Löslichkeit)", zorder=5)
+    ax1.scatter([p_suction], [sol_s_cm3N_L], s=180, marker="o",
+                edgecolors="black", linewidths=2, label="Saugpunkt (Löslichkeit)", zorder=6)
+    ax1.scatter([p_discharge], [sol_d_cm3N_L], s=140, marker="s",
+                edgecolors="black", linewidths=2, label="Druckseite (Löslichkeit)", zorder=6)
+
     ax1.set_xlabel("p_abs [bar]")
     ax1.set_ylabel("Löslichkeit [cm³N/L]")
-    ax1.set_title("Gaslöslichkeit (Henry → Normvolumen, diagonal)")
+    ax1.set_title("Gaslöslichkeit (Henry → Normvolumen)")
     ax1.grid(True, alpha=0.3)
     ax1.legend(fontsize=9)
 
@@ -747,7 +738,7 @@ elif st.session_state.page == "mph":
                      label=f"{pump['id']} ({gvf_key}% GVF)")
 
         ax2.scatter([Q_req_lmin], [dp_req], s=180, marker="o",
-                    edgecolors="black", linewidths=2, label="Betriebspunkt (Δp_req)", zorder=5)
+                    edgecolors="black", linewidths=2, label="Betriebspunkt (Δp_req)", zorder=6)
         ax2.set_xlabel("Q [L/min]")
         ax2.set_ylabel("Δp [bar]")
         ax2.set_title(f"Mehrphasen-Kennlinien (Δp): {pump['id']}")
@@ -767,87 +758,50 @@ elif st.session_state.page == "mph":
     st.pyplot(fig, clear_figure=True)
 
     # =========================
-    # Plot 3 (Overlay wie Vorlage):
-    # "Pumpenkennlinien (Gasvolumenstrom) über Löslichkeit (diagonal)"
+    # Overlay wie Vorlage: Kennlinien (Gas) über Löslichkeit (Kapazität)
     # =========================
-    st.markdown("## 📉 Overlay: Pumpenkennlinien (Gasvolumenstrom) über Löslichkeit (diagonal)")
+    st.markdown("## 📉 Overlay wie Vorlage: Pumpenkennlinien über Löslichkeit")
 
     fig3, ax3 = plt.subplots(figsize=(14, 6))
 
-    # Diagonale Löslichkeit (cm³N/L) für T-10/T/T+10
+    # 1) Löslichkeit als Kapazität in L_N/min
+    cap_colors = ["tab:blue", "tab:green", "tab:orange"]
+    ps = linspace(0.1, 14, 140)
     for i, T in enumerate(temp_variants):
-        pressures, sol_cm3N = solubility_diagonal_curve_cm3N_per_L(gas_medium, T, p_max=14, y_gas=y_gas)
-        ax3.plot(pressures, sol_cm3N, "--", linewidth=2,
-                 color=color_cycle[i % len(color_cycle)],
-                 label=f"Löslichkeit {gas_medium} {T:.0f}°C")
+        cap = [solubility_capacity_LminN(gas_medium, p, T, Q_req, y_gas=y_gas) for p in ps]
+        ax3.plot(ps, cap, "--", linewidth=2,
+                 color=cap_colors[i % len(cap_colors)],
+                 label=f"Löslichkeit {gas_medium} {T:.0f}°C (Kapazität)")
 
-    # Marker am Saugpunkt (Löslichkeit)
-    ax3.scatter([p_suction], [dissolved_cm3N_L], s=180, marker="o",
-                edgecolors="black", linewidths=2, label="Saugpunkt (Löslichkeit)", zorder=5)
+    cap_suction = solubility_capacity_LminN(gas_medium, p_suction, temperature, Q_req, y_gas=y_gas)
+    ax3.scatter([p_suction], [cap_suction], s=180, marker="o",
+                edgecolors="black", linewidths=2, label="Saugpunkt (Kapazität)", zorder=6)
 
-    # Pumpen-"Kennlinien" als Gasvolumenstrom (bei p): y-Achse in "L/min Gas (Norm)" bzw cm³N/L Skala
-    # Idee wie Folie: "Scale: 100 Ncm³/Liter is 10%"
-    #
-    # Wir zeigen für:
-    # - tatsächlicher GVF_in (aus Slider oder aus Nm³/h berechnet)
-    # - Referenzen 10/15/20%
-    #
-    # Dazu brauchen wir Gasstrom als Funktion von Druck: Q_gas,N(p) bei konstantem GVF_in und konstantem Q_liq.
-    #
-    # Schritt:
-    #   Vgas_total_oper/L = GVF/(1-GVF)  (bei Betrieb)
-    #   davon gelöst max (oper) = dissolved_oper_L_per_L
-    #   freies Gas oper/L = max(0, total - dissolved)
-    #   -> in Normvolumen umrechnen: * ratio_oper_to_norm
-    #
-    # Um eine "Kennlinie" zu erzeugen, vary p_abs entlang x-Achse und berechne freies Gas pro Liter (Norm) und
-    # daraus Gasvolumenstrom (Norm) = (freies Gas pro Liter) * Q_liq
-    #
-    # Anschließend plotten wir Gasstrom in L/min_N (passt zur Vorlage-Optik).
-
-    def free_gas_flow_curve_LminN(gvf_in_pct, T_c, Q_liq_m3h, p_min=0.1, p_max=14, n=120):
-        ps = linspace(p_min, p_max, n)
-        Q_liq_Lmin = m3h_to_lmin(Q_liq_m3h)
-
-        ys = []
-        for p_abs in ps:
-            dissolved_oper = gas_solubility_L_per_L_oper(gas_medium, p_abs, T_c, y_gas=y_gas)
-            gvf_free_pct_local, Vtot_oper, Vdiss_oper, Vfree_oper = free_gvf_from_total_and_dissolved_oper(gvf_in_pct, dissolved_oper)
-
-            # freies Gas pro Liter Flüssigkeit (oper) = Vfree_oper (da Vliq=1L)
-            ratio = oper_to_norm_volume_ratio(p_abs, T_c)
-            Vfree_norm_L_per_L = Vfree_oper * ratio  # L_N / L_liq
-
-            # Gasstrom Norm [L_N/min] = (L_N/L) * Q_liq [L/min]
-            Qgas_LminN = Vfree_norm_L_per_L * Q_liq_Lmin
-            ys.append(Qgas_LminN)
-        return ps, ys
-
-    # tatsächlicher GVF_in (aus gewählter Eingabeart)
-    gvf_actual = float(gvf_in)
-
-    # Referenzen: 10/15/20 plus actual (wenn nicht nah dran)
-    ref_list = [10.0, 15.0, 20.0]
-    if all(abs(gvf_actual - r) > 0.2 for r in ref_list):
-        ref_list = [gvf_actual] + ref_list
+    # 2) Gas-Kennlinien (freies Gas) in L_N/min
+    ref_pct = [10.0, 15.0, 20.0]
+    if gas_mode.startswith("GVF_out"):
+        actual_pct = float(gvf_out_pct)
+        refs = [actual_pct] + ref_pct
     else:
-        # wenn nahezu identisch, zeigen wir trotzdem "actual" gesondert
-        ref_list = [gvf_actual] + ref_list
+        actual_pct = total_cm3N_L / 10.0
+        refs = [actual_pct] + ref_pct
 
-    # Linien zeichnen
-    line_colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple"]
-    for i, gvf_ref in enumerate(ref_list):
-        ps, qgas = free_gas_flow_curve_LminN(gvf_ref, temperature, Q_req, p_min=0.1, p_max=14, n=140)
-        label = f"{gvf_ref:.1f}% GVF (Gasstrom als Pumpenkennlinie)"
-        lw = 3.0 if abs(gvf_ref - gvf_actual) < 1e-6 else 2.0
-        ax3.plot(ps, qgas, "-", linewidth=lw, color=line_colors[i % len(line_colors)], label=label)
+    line_colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
+    for i, gvf_ref in enumerate(refs):
+        total_ref_cm3N_L = total_gas_cm3N_per_L_from_gvf_like(gvf_ref)
+        ps2, qfree = curve_free_gas_LminN(total_ref_cm3N_L, gas_medium, temperature, Q_req, p_min=0.1, p_max=14, n=140, y_gas=y_gas)
+
+        is_actual = abs(gvf_ref - actual_pct) < 1e-6
+        lw = 3.2 if is_actual else 2.0
+        label = f"{gvf_ref:.1f}% (Gas-Kennlinie)" + (" (tatsächlich)" if is_actual else "")
+        ax3.plot(ps2, qfree, "-", linewidth=lw, color=line_colors[i % len(line_colors)], label=label)
 
     ax3.set_xlabel("Druck [bar abs]")
-    ax3.set_ylabel("Löslichkeit [cm³N/L]  /  Gasvolumenstrom [L_N/min]")
-    ax3.set_title("Overlay wie Vorlage: Pumpenkennlinien (Gasstrom) über Löslichkeit")
+    ax3.set_ylabel("L_N/min (Kapazität / freies Gas)")
+    ax3.set_title("Overlay: Löslichkeit (Kapazität) + Gas-Kennlinien (wie Vorlage)")
     ax3.grid(True, alpha=0.3)
     ax3.set_xlim(0, 14)
-    ax3.set_ylim(0, 180)  # wie deine Vorlage (Skala)
+    ax3.set_ylim(0, 180)
     ax3.legend(fontsize=9, ncol=2)
 
     st.pyplot(fig3, clear_figure=True)
@@ -858,94 +812,46 @@ elif st.session_state.page == "mph":
     st.divider()
     st.markdown("### ✅ Ergebnisse (Mehrphase)")
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Q_liq", f"{Q_req:.1f} m³/h", f"{Q_req_lmin:.1f} L/min")
-    c2.metric("Δp_req", f"{dp_req:.3f} bar", f"p_d={p_discharge:.2f} | p_s={p_suction:.2f}")
-    if mode == "Q_air_N [Nm³/h]":
-        c3.metric("Q_air,N", f"{Q_air_Nm3h:.2f} Nm³/h", f"GVF_in≈{gvf_in:.2f}%")
-    else:
-        c3.metric("GVF_in", f"{gvf_in:.2f} %")
-    c4.metric("Löslichkeit (Saugseite)", f"{dissolved_oper_L_per_L:.6f} L/L (oper)", f"{dissolved_cm3N_L:.2f} cm³N/L")
-    c5.metric("GVF_free (für Kennlinie)", f"{gvf_free:.2f} %")
+    cap_suction = solubility_capacity_LminN(gas_medium, p_suction, temperature, Q_req, y_gas=y_gas)
 
-    if not_solvable:
-        st.warning("⚠️ Der eingestellte Gasanteil ist am Saugpunkt NICHT vollständig löslich → freie Gasphase entsteht (Worst Case relevant).")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Q_liq", f"{Q_req:.1f} m³/h", f"{m3h_to_lmin(Q_req):.1f} L/min")
+    c2.metric("Δp_req", f"{dp_req:.3f} bar", f"p_d={p_discharge:.2f} | p_s={p_suction:.2f}")
+
+    if gas_mode.startswith("GVF_out"):
+        c3.metric("GVF_out (gelöst)", f"{gvf_out_pct:.2f} %", "an Druckseite")
     else:
-        st.info("ℹ️ Der eingestellte Gasanteil liegt im Löslichkeitslimit (am Saugpunkt).")
+        c3.metric("Recyclingstrom", f"{float(Q_rec_m3h):.2f} m³/h", "gesättigt an Druckseite")
+
+    c4.metric("Löslichkeit p_s", f"{sol_s_cm3N_L:.1f} cm³N/L", f"Kapazität {cap_suction:.1f} L_N/min")
+    c5.metric("freies Gas p_s", f"{free_s_cm3N_L:.1f} cm³N/L", f"GVF_free≈{gvf_free_req_pct:.2f}%")
+
+    if not_solvable_at_discharge:
+        st.error("❌ Nicht möglich: Der gewählte GVF_out ist bei p_d,T nicht vollständig löslich.")
+    if not_solvable_at_suction:
+        st.warning("⚠️ Beim Druckabfall zur Saugseite entsteht freie Gasphase (Worst Case relevant).")
+    else:
+        st.info("ℹ️ Bei p_s,T bleibt alles gelöst (kein freies Gas).")
+
+    if only_dissolved_allowed and not_solvable_at_suction:
+        st.error("❌ Auswahl blockiert (Nur gelöst zulässig). Deaktiviere die Option, um Worst-Case (freies Gas) auszulegen.")
 
     if best:
         st.markdown("### 🔧 Empfohlene Pumpe")
         st.success(f"**{best['pump']['id']}** | Kurve: **{best['gvf_curve']}% GVF** | Modus: **{best['mode']}**")
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Δp verfügbar", f"{best['dp_available']:.3f} bar", f"Reserve: {best['dp_reserve']:.3f} bar")
-        c2.metric("Leistung", f"{best['P_required']:.2f} kW")
-        c3.metric("Drehzahl n/n0", f"{best['n_ratio']:.3f}", f"{best['n_ratio']*100:.1f}%")
-        c4.metric("GVF_max Pumpe", f"{best['pump']['GVF_max']*100:.0f}%")
+        a, b, c, d = st.columns(4)
+        a.metric("Δp verfügbar", f"{best['dp_available']:.3f} bar", f"Reserve: {best['dp_reserve']:.3f} bar")
+        b.metric("Leistung", f"{best['P_required']:.2f} kW")
+        c.metric("Drehzahl n", f"{best.get('n_abs_rpm', N0_RPM_DEFAULT):.0f} rpm")
+        st.caption(f"n/n0 = {best['n_ratio']:.3f}")
+        d.metric("GVF_max Pumpe", f"{best['pump']['GVF_max']*100:.0f}%")
 
-        # Nur noch warnen, wenn wirklich unterschritten (Toleranz)
         if best["dp_available"] + 1e-6 < dp_req:
             st.error("❌ Δp_req wird nicht erreicht (sollte bei Auswahl nicht passieren).")
     else:
-        if not (only_dissolved_allowed and not_solvable):
+        if not (only_dissolved_allowed and not_solvable_at_suction):
             st.error("❌ Keine geeignete Mehrphasenpumpe gefunden.")
-
-    with st.expander("📘 Rechenweg (ausführlich)", expanded=False):
-        st.markdown(f"""
-## Schritt 1: Δp-Anforderung (ohne Zusatzverluste)
-Da **Δp_loss entfernt** ist, gilt:
-
-""")
-        st.latex(r"\Delta p_{req} = p_d - p_s")
-        st.markdown(f"- p_s = {p_suction:.2f} bar abs  \n- p_d = {p_discharge:.2f} bar abs  \n⇒ **Δp_req = {dp_req:.3f} bar**")
-
-        st.markdown("---")
-        st.markdown("## Schritt 2: Löslichkeit am Saugpunkt (Henry + ideales Gas)")
-        st.markdown("Wir berechnen das maximal lösliche Gasvolumen bezogen auf **1 Liter Flüssigkeit** am Saugpunkt.")
-
-        st.markdown("1) Henry (Konzentration):")
-        st.latex(r"C = \frac{p_{partial}}{H(T)}")
-
-        st.markdown("2) Ideales Gas (Molarvolumen bei Betriebsbedingungen):")
-        st.latex(r"V_{molar,oper} = \frac{RT}{p}")
-
-        st.markdown("3) Gasvolumen pro Liter Flüssigkeit (operativ):")
-        st.latex(r"\frac{V_{gas,oper}}{V_{liq}} = C \cdot V_{molar,oper}")
-
-        st.markdown(f"Ergebnis am Saugpunkt:\n- **{dissolved_oper_L_per_L:.6f} L/L (operativ)**")
-
-        st.markdown("Für die **diagonale Darstellung** wird in **Normvolumen** umgerechnet:")
-        st.latex(r"V_N = V_{oper}\cdot\frac{p_{oper}}{p_N}\cdot\frac{T_N}{T_{oper}}")
-        st.markdown(f"⇒ **Löslichkeit = {dissolved_cm3N_L:.2f} cm³N/L**")
-
-        st.markdown("---")
-        st.markdown("## Schritt 3: GVF_in (aus % oder aus Nm³/h) und freies Gas")
-        if mode == "Q_air_N [Nm³/h]":
-            st.markdown("Du gibst einen Luftstrom in **Nm³/h** ein. Daraus wird der GVF am Saugpunkt berechnet:")
-            st.latex(r"V_{oper} = V_N \cdot \frac{p_N}{p_{oper}}\cdot\frac{T_{oper}}{T_N}")
-            st.latex(r"GVF = \frac{V_{oper}}{V_{oper}+Q_{liq}}")
-            st.markdown(f"- Eingabe: Q_air,N = **{Q_air_Nm3h:.2f} Nm³/h**")
-            st.markdown(f"- Umgerechnet: GVF_in ≈ **{gvf_in:.2f}%** (bei p_s,T)")
-
-        st.markdown("Anschließend (Worst Case) wird geprüft, ob alles löslich ist:")
-        st.latex(r"V_{gas,total} = \frac{GVF}{1-GVF}\cdot V_{liq}")
-        st.latex(r"V_{gas,free} = \max(0, V_{gas,total}-V_{gas,diss,max})")
-        st.latex(r"GVF_{free} = \frac{V_{gas,free}}{V_{gas,free}+V_{liq}}")
-
-        st.markdown(f"- V_gas,total (oper/L) = **{Vgas_total_oper:.6f}**")
-        st.markdown(f"- V_gas,diss,max (oper/L) = **{Vgas_diss_oper:.6f}**")
-        st.markdown(f"- V_gas,free (oper/L) = **{Vgas_free_oper:.6f}**")
-        st.markdown(f"⇒ **GVF_free = {gvf_free:.2f}%**")
-
-        st.markdown("---")
-        st.markdown("## Schritt 4: Kennlinienwahl und Drehzahl (Affinität)")
-        st.markdown("""
-- Kennlinienwahl **Worst Case**: nächsthöhere GVF-Kurve ≥ GVF_free  
-- Vergleich gegen Δp(Q)  
-- Optional Drehzahl-Anpassung:
-""")
-        st.latex(r"Q \sim n,\quad \Delta p \sim n^2,\quad P \sim n^3")
-        st.markdown("Die Bisektion sucht n/n0, so dass Δp(Q_req) = Δp_req erfüllt wird (sofern möglich).")
 
 # =========================================================
 # PAGE 3: ATEX
