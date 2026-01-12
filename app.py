@@ -942,4 +942,4 @@ def run_atex_selection():
                 <h2>Ergebnisse</h2>
                 <table>
                     <tr><th>Parameter</th><th>Wert</th></tr>
-                    <tr><td>Erforderliche Wellenleistung</td><td>{P_req:.2f} kW</
+                    <tr><td>Erforderliche Wellenleistung</td><td>{P_req:.2f} kW</"""
