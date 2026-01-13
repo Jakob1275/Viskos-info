@@ -737,8 +737,8 @@ def run_multi_phase_pump():
             st.metric("Förderstrom", f"{Q_pump:.2f} m³/h")
             st.metric("Förderhöhe (Δp)", f"{dp_req:.2f} bar")
         with r2:
-            st.metric("C_sat @ p_s", f"{C_sat_s:.1f} Ncm³/L")
-            st.metric("C_sat @ p_d", f"{C_sat_d:.1f} Ncm³/L")
+            st.metric(f"bei p_s = {p_suction:.2f} bar", f"{frac_diss_s:.1f}% gelöst")
+            st.metric(f"bei p_d = {p_discharge:.2f} bar", f"{frac_diss_d:.1f}% gelöst")
         with r3:
             st.metric("C_ziel", f"{C_ziel:.1f} Ncm³/L")
             if p_req is None:
@@ -750,29 +750,29 @@ def run_multi_phase_pump():
             if p_req is not None:
                 st.metric("p_d ausreichend?", "Ja" if pd_ok else "Nein")
 
-        st.subheader("Gelöst-Anteil (bezogen auf C_ziel):")
-        g1, g2 = st.columns(2)
-        with g1:
-            st.metric(f"bei p_s = {p_suction:.2f} bar", f"{frac_diss_s:.1f}% gelöst")
-        with g2:
-            st.metric(f"bei p_d = {p_discharge:.2f} bar", f"{frac_diss_d:.1f}% gelöst")
+        #st.subheader("Gelöst-Anteil (bezogen auf C_ziel):")
+        #g1, g2 = st.columns(2)
+        #with g1:
+            #st.metric(f"bei p_s = {p_suction:.2f} bar", f"{frac_diss_s:.1f}% gelöst")
+        #with g2:
+            #st.metric(f"bei p_d = {p_discharge:.2f} bar", f"{frac_diss_d:.1f}% gelöst")
 
         # Klar benannt: gelöst / frei (Norm)
-        s1, s2, s3, s4 = st.columns(4)
-        with s1:
-            st.metric("Gelöst @ p_s", f"{C_diss_s:.1f} Ncm³/L")
-        with s2:
-            st.metric("Frei @ p_s", f"{C_free_s:.1f} Ncm³/L")
-        with s3:
-            st.metric("Gelöst @ p_d", f"{C_diss_d:.1f} Ncm³/L")
-        with s4:
-            st.metric("Frei @ p_d", f"{C_free_d:.1f} Ncm³/L")
+        #s1, s2, s3, s4 = st.columns(4)
+        #with s1:
+            #st.metric("Gelöst @ p_s", f"{C_diss_s:.1f} Ncm³/L")
+        #with s2:
+            #st.metric("Frei @ p_s", f"{C_free_s:.1f} Ncm³/L")
+        #with s3:
+            #st.metric("Gelöst @ p_d", f"{C_diss_d:.1f} Ncm³/L")
+        #with s4:
+            #st.metric("Frei @ p_d", f"{C_free_d:.1f} Ncm³/L")
 
         if best_pump:
             st.success(f"✅ Empfohlene Pumpe: {best_pump['pump']['id']} (Kennlinie {best_pump['gvf_key']}% GVF)")
             p1, p2, p3, p4 = st.columns(4)
             with p1:
-                st.metric("Δp verfügbar", f"{best_pump['dp_avail']:.2f} bar")
+                st.metric("Förderhöhe", f"{best_pump['dp_avail']:.2f} bar")
             with p2:
                 st.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
             with p3:
