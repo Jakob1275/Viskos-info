@@ -545,19 +545,20 @@ def run_single_phase_pump():
             saving_pct = ((P_nom_at_Q - P_opt_kW) / P_nom_at_Q * 100.0) if P_nom_at_Q > 0 else 0.0
 
         st.subheader("Ergebnisse")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
             st.metric("Gewählte Pumpe", best["id"])
+        with c2:
             st.metric("Q_vis", f"{Q_vis_req:.2f} m³/h")
             st.metric("H_vis", f"{H_vis_req:.2f} m")
-        with c2:
+        with c3:
             st.metric("Q_wasser (Äquivalent)", f"{Q_water:.2f} m³/h")
             st.metric("H_wasser (Äquivalent)", f"{H_water:.2f} m")
-            st.metric("η_vis", f"{eta_vis:.3f}")
-        with c3:
+        with c4:
             st.metric("Wellenleistung (viskos)", f"{P_vis_kW:.2f} kW")
             st.metric("Motor (+Reserve)", f"{P_motor_kW:.2f} kW")
-        with c4:
+            st.metric("η_vis", f"{eta_vis:.3f}")
+        with c5:
             if n_opt_rpm is not None and saving_pct is not None:
                 st.metric("Optimale Drehzahl", f"{n_opt_rpm:.0f} rpm")
                 st.metric("Energieeinsparung", f"{saving_pct:.1f}%")
