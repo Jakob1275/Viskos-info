@@ -1,15 +1,13 @@
 # app.py — Streamlit Cloud lauffähig (Einphase + Mehrphase + ATEX)
-# Änderungen ggü. letzter Version:
-# ✅ Reiter/Navigation wieder wie zuvor (Sidebar-Radio: Einphase / Mehrphase / ATEX)
-# ✅ Eingaben NICHT mehr komplett links in der Sidebar → stattdessen je Seite links im Content (2-Spalten-Layout)
-# ✅ Einphase: zusätzlich Q_wasser und H_wasser (Abbildungspunkt) anzeigen
-# ✅ Q-P-Kennlinie: Wasser bleibt Wasser (Power wird aus H(Q) & η(Q) konsistent berechnet)
-# ✅ Rechenwege deutlich ausführlicher + Formeln (st.latex) + Einsetzen der Werte
-# ✅ Mehrphase: Berechnung transparent gemacht + zusätzlicher Modus, der dein Bauchgefühl abbildet:
-#    - Option "GVF-Eingabe bezieht sich auf" (Druckseite vs Saugseite)
-#    - damit ist klar: bei GVF>0 an Druckseite ist freie Gasphase an Saugseite i. d. R. zwangsläufig (wegen niedrigerer Löslichkeit),
-#      ABER wenn du GVF als Saugseitenwert meinst, wird anders gerechnet.
-# ✅ NPSH komplett entfernt (wie gewünscht)
+# Überarbeitung (nur Mehrphasen-Teil, aber gesamter Code ausgegeben):
+# ✅ Mehrphase: klare Logik "entweder Prozess-Volumenstrom ODER Recyclingstrom" (gegenseitig ausschließend)
+# ✅ Wenn Recyclingstrom gewählt → Q_pumpe = Q_rec (überschreibt Prozessstrom komplett)
+# ✅ Wenn Prozessstrom gewählt → Q_pumpe = Q_liq
+# ✅ Meldungen "freies Gas an Saugseite/Druckseite" entfernt
+# ✅ Ergebnis ergänzt: "Wie viel % des System-Gases ist bei p_s / p_d gelöst" (Dissolved-Fraktion)
+# ✅ Rechenweg mit Formeln bleibt ausführlich
+# Hinweis: Das Modell führt eine konservative "System-Gasmenge (Norm cm³N/L)" als Basisgröße.
+#         Daraus wird die gelöste Menge = min(total, Löslichkeit(p)) und der gelöste Anteil berechnet.
 
 import math
 import warnings
@@ -191,7 +189,6 @@ def compute_B_HI(Q_m3h, H_m, nu_cSt):
 
 
 def viscosity_correction_factors(B):
-    # sehr wichtig: Wasser nicht "verfälschen"
     if B <= 1.0:
         return 1.0, 1.0
     CH = math.exp(-0.165 * (math.log10(B) ** 2.2))
@@ -205,8 +202,8 @@ def viscosity_correction_factors(B):
 def viscous_to_water_point(Q_vis_m3h, H_vis_m, nu_cSt):
     B = compute_B_HI(Q_vis_m3h, H_vis_m, nu_cSt)
     CH, Ceta = viscosity_correction_factors(B)
-    Q_w = float(Q_vis_m3h)                 # robust (CQ≈1)
-    H_w = float(H_vis_m) / max(CH, 1e-9)   # invertiere CH
+    Q_w = float(Q_vis_m3h)
+    H_w = float(H_vis_m) / max(CH, 1e-9)
     return {"Q_w": Q_w, "H_w": H_w, "B": B, "CH": CH, "Ceta": Ceta}
 
 
@@ -343,6 +340,15 @@ def solubility_curve(gas, T_celsius, p_min=0.2, p_max=14.0, n=140):
     ps = np.linspace(p_min, p_max, n)
     sol = [gas_solubility_cm3N_per_L(gas, p, T_celsius) for p in ps]
     return ps, np.array(sol)
+
+
+def dissolved_fraction(total_cm3N_L, solubility_cm3N_L):
+    """Anteil des System-Gases, der bei gegebenem Druck gelöst vorliegt."""
+    tot = max(float(total_cm3N_L), 0.0)
+    if tot <= 0:
+        return 1.0
+    sol = max(float(solubility_cm3N_L), 0.0)
+    return safe_clamp(min(tot, sol) / tot, 0.0, 1.0)
 
 
 # =========================
@@ -565,7 +571,6 @@ def run_single_phase_pump():
             st.subheader("Kennlinien")
             fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
-            # Q-H
             ax1.plot(pump["Qw"], pump["Hw"], "o-", label="Wasser (n0)")
             ax1.plot(Q_vis_curve, H_vis_curve, "s--", label="Viskos (n0)")
             if n_ratio_opt is not None:
@@ -580,7 +585,6 @@ def run_single_phase_pump():
             ax1.grid(True)
             ax1.legend()
 
-            # Q-η
             ax2.plot(pump["Qw"], pump["eta"], "o-", label="Wasser (n0)")
             ax2.plot(Q_vis_curve, eta_vis_curve, "s--", label="Viskos (n0)")
             ax2.scatter([Q_vis_req], [eta_vis_at_Q], marker="x", s=90, label="η (viskos @ BP)")
@@ -590,7 +594,6 @@ def run_single_phase_pump():
             ax2.grid(True)
             ax2.legend()
 
-            # Q-P (konsistent!)
             ax3.plot(pump["Qw"], Pw_water_curve, "o-", label="Wasser (aus H,η berechnet)")
             ax3.plot(Q_vis_curve, P_vis_curve, "s--", label="Viskos (aus H_vis,η_vis berechnet)")
             if n_ratio_opt is not None:
@@ -607,105 +610,59 @@ def run_single_phase_pump():
             plt.tight_layout()
             st.pyplot(fig)
 
-            with st.expander("Rechenweg (Einphase) – mit Formeln"):
-                st.markdown("### 1) Eingang")
-                st.latex(r"Q_{vis},\,H_{vis},\,\nu,\,\rho")
-                st.markdown(f"- **Q_vis** = {Q_vis_req:.4f} m³/h")
-                st.markdown(f"- **H_vis** = {H_vis_req:.4f} m")
-                st.markdown(f"- **ν** = {nu:.4f} cSt")
-                st.markdown(f"- **ρ** = {rho:.2f} kg/m³")
-
-                st.markdown("### 2) HI-Kennzahl B (vereinfachter, robuster Ansatz)")
-                st.latex(r"Q_{gpm}=4.40287\cdot Q_{m^3/h}")
-                st.latex(r"H_{ft}=3.28084\cdot H_{m}")
-                st.latex(r"B = 16.5\cdot \frac{\sqrt{\nu}}{Q_{gpm}^{0.25}\cdot H_{ft}^{0.375}}")
-                Q_gpm = Q_vis_req * 4.40287
-                H_ft = H_vis_req * 3.28084
-                st.markdown(f"- Q_gpm = {Q_gpm:.4f} gpm")
-                st.markdown(f"- H_ft  = {H_ft:.4f} ft")
-                st.markdown(f"- **B = {B:.6f}**")
-
-                st.markdown("### 3) Korrekturfaktoren")
-                st.markdown("Wichtig: Für **B ≤ 1** setzen wir **C_H=1** und **C_η=1** → *Wasser bleibt Wasser*.")
-                st.latex(r"C_H=\begin{cases}1,&B\le 1\\ \exp\left(-0.165\cdot(\log_{10}B)^{2.2}\right),&B>1\end{cases}")
-                st.latex(r"C_\eta=\begin{cases}1,&B\le 1\\ 1-0.25\log_{10}B-0.05(\log_{10}B)^2,&B>1\end{cases}")
-                st.markdown(f"- **C_H = {CH:.6f}**")
-                st.markdown(f"- **C_η = {Ceta:.6f}**")
-
-                st.markdown("### 4) Abbildung auf Wasserkennlinie")
-                st.latex(r"Q_w \approx Q_{vis}")
-                st.latex(r"H_w = \frac{H_{vis}}{C_H}")
-                st.markdown(f"- **Q_w = {Q_w:.4f} m³/h**")
-                st.markdown(f"- **H_w = {H_w:.4f} m**")
-
-                st.markdown("### 5) Leistung am Betriebspunkt (viskos)")
-                st.latex(r"P_{hyd}=\rho\cdot g\cdot Q\cdot H")
-                st.latex(r"P_{shaft}=\frac{P_{hyd}}{\eta_{vis}}")
-                st.latex(r"\eta_{vis}\approx \eta_w(Q_w)\cdot C_\eta")
-                P_hyd_W = rho * G * (Q_vis_req / 3600.0) * H_vis_req
-                st.markdown(f"- P_hyd = {P_hyd_W:.2f} W")
-                st.markdown(f"- η_vis = {eta_vis_at_Q:.6f}")
-                st.markdown(f"- **P_shaft = {P_vis_kW:.4f} kW**")
-                st.latex(r"P_{motor}=IEC\left(P_{shaft}\cdot(1+\text{Reserve})\right)")
-                st.markdown(f"- Reserve = {reserve_pct}% → **P_motor ≈ {P_motor_kW:.2f} kW**")
-
-                st.markdown("### 6) Drehzahl-Optimierung (Affinitätsgesetze)")
-                st.latex(r"Q\sim n,\quad H\sim n^2,\quad P\sim n^3")
-                st.latex(r"H(Q_{req}) = H_{curve}(Q_{req}/n_r)\cdot n_r^2")
-                if n_ratio_opt is not None and P_opt_kW is not None:
-                    st.markdown(f"- n_r = n/n0 = {n_ratio_opt:.6f}")
-                    st.markdown(f"- n_opt = {n_opt_rpm:.1f} rpm")
-                    st.markdown(f"- P_opt = {P_opt_kW:.4f} kW")
-                    st.markdown(f"- Einsparung = {saving_pct:.2f}%")
-                else:
-                    st.markdown("- Keine Lösung im gewählten Drehzahlbereich.")
-
     except Exception as e:
         show_error(e, "Einphase")
 
 
+# ==========================================================
+# ✅ ÜBERARBEITET: Mehrphasenpumpen-Auslegung (nur dieser Teil)
+# ==========================================================
 def run_multi_phase_pump():
     try:
-        st.header("Mehrphasenpumpen – Löslichkeit (Henry) & freie Gasphase")
+        st.header("Mehrphasenpumpen – Auslegung über Gaslöslichkeit & Gasanteil")
 
         left, right = st.columns([1.0, 2.2], gap="large")
 
         with left:
-            st.subheader("Eingaben")
-            with st.form("multi_phase_form"):
+            st.subheader("Eingaben (klar & eindeutig)")
+            with st.form("multi_phase_form_v2"):
 
-                st.markdown("**Prozessdaten**")
-                Q_req = st.number_input("Flüssigkeitsvolumenstrom Q_liq [m³/h]", min_value=0.1, value=5.0, step=0.1)
+                st.markdown("**Prozessdrücke**")
                 p_suction = st.number_input("Absolutdruck Saugseite p_s [bar]", min_value=0.2, value=2.0, step=0.1)
-                p_discharge = st.number_input("Absolutdruck Druckseite p_d [bar]", min_value=0.2, value=7.0, step=0.1)
+                p_discharge = st.number_input("Absolutdruck Druckseite p_d [bar]", min_value=0.2, value=10.0, step=0.1)
                 dp_req = max(0.0, p_discharge - p_suction)
 
-                st.markdown("**Gas / Medium**")
+                st.markdown("**Medium**")
                 gas_medium = st.selectbox("Gasmedium", list(HENRY_CONSTANTS.keys()), index=0)
                 liquid_medium = st.selectbox("Flüssigmedium", list(MEDIA.keys()), index=0)
                 temperature = st.number_input("Temperatur T [°C]", min_value=-10.0, value=20.0, step=1.0)
 
-                st.markdown("**Eingabeart Gas**")
-                gas_mode = st.radio(
-                    "Gasvorgabe",
-                    ["GVF [%]", "Recyclingstrom [m³/h] (nur gelöst)"],
+                st.markdown("**Hydraulischer Volumenstrom durch die Pumpe (nur EIN Input aktiv)**")
+                flow_mode = st.radio(
+                    "Welche Größe ist vorgegeben?",
+                    ["Prozess-Volumenstrom Q_liq", "Recyclingstrom Q_rec (überschreibt Q_liq)"],
                     index=0
                 )
 
-                gvf_location = None
-                gvf_pct = None
-                Q_rec = None
-
-                if gas_mode == "GVF [%]":
-                    gvf_location = st.radio(
-                        "GVF bezieht sich auf",
-                        ["Druckseite (freie Gasphase)", "Saugseite (freie Gasphase)"],
-                        index=0
-                    )
-                    gvf_pct = st.slider("GVF [%]", 0.0, 40.0, 5.4, 0.1)
+                if flow_mode == "Prozess-Volumenstrom Q_liq":
+                    Q_liq = st.number_input("Q_liq [m³/h]", min_value=0.1, value=8.0, step=0.1)
+                    Q_rec = None
+                    Q_pump = Q_liq
                 else:
-                    Q_rec = st.number_input("Recyclingstrom Q_rec [m³/h]", min_value=0.0, value=3.0, step=0.1)
+                    Q_rec = st.number_input("Q_rec [m³/h]", min_value=0.1, value=8.0, step=0.1)
+                    Q_liq = None
+                    Q_pump = Q_rec  # Überschreibt Prozessstrom vollständig
 
+                st.divider()
+                st.markdown("**Gasvorgabe (freie Gasphase als GVF)**")
+                gvf_location = st.radio(
+                    "GVF bezieht sich auf",
+                    ["Saugseite (frei)", "Druckseite (frei)"],
+                    index=0
+                )
+                gvf_pct = st.slider("GVF [%] (freie Gasphase)", 0.0, 40.0, 5.0, 0.1)
+
+                st.divider()
                 st.markdown("**Optionen**")
                 show_temp_band = st.checkbox("Temperaturband im Löslichkeitsdiagramm", value=True)
                 only_dissolved = st.checkbox("Nur gelöstes Gas zulassen", value=False)
@@ -721,106 +678,84 @@ def run_multi_phase_pump():
         rho_liq = float(MEDIA[liquid_medium]["rho"])
         nu_liq = float(MEDIA[liquid_medium]["nu"])
 
-        # Löslichkeiten
+        # 1) Löslichkeiten bei Saug- und Druckseite
         sol_s = gas_solubility_cm3N_per_L(gas_medium, p_suction, temperature)
         sol_d = gas_solubility_cm3N_per_L(gas_medium, p_discharge, temperature)
 
-        # Kernidee:
-        # - Wir führen eine "Gesamtgasmenge" (Norm cm³N/L) als konservative Größe mit.
-        # - Freies Gas entsteht an der Stelle, wo Gesamtgas > Löslichkeit(p,T).
-        #
-        # Problem/Unübersichtlichkeit bisher:
-        # Wenn du GVF an Druckseite vorgibst, ist "Gesamtgas_d" = sol_d + free_d.
-        # Bei niedrigerem p_s ist sol_s < sol_d → es wird fast immer freie Gasphase an Saugseite entstehen.
-        # Das ist physikalisch plausibel (Entspannung reduziert Löslichkeit).
-        #
-        # ABER: Wenn du GVF eigentlich als Saugseiten-GVF meinst, muss das Modell anders aufgezogen werden.
-        # → daher die neue Option "GVF bezieht sich auf".
-
-        has_free_gas_discharge = False
-        has_free_gas_suction = False
-
-        # Schritt A: Bestimme Gesamtgas (Norm) so, dass Eingabe erfüllt ist
-        if gas_mode == "GVF [%]":
-            if gvf_location.startswith("Druckseite"):
-                free_d_cm3N_L = free_gas_cm3N_L_from_gvf_pct(gvf_pct, p_discharge, temperature, gas_medium)
-                total_cm3N_L = sol_d + free_d_cm3N_L
-                has_free_gas_discharge = gvf_pct > 0
-            else:
-                # GVF gegeben an Saugseite: daraus freies Gas an Saugseite (Norm)
-                free_s_cm3N_L = free_gas_cm3N_L_from_gvf_pct(gvf_pct, p_suction, temperature, gas_medium)
-                # Gesamtgas an Saugseite = gelöst (max sol_s) + frei
-                total_cm3N_L = sol_s + free_s_cm3N_L
-                has_free_gas_suction = gvf_pct > 0
+        # 2) Bestimme konservative System-Gasmenge (Norm cm³N/L)
+        #    Dazu nutzen wir die GVF-Eingabe (freie Gasphase) an der gewählten Seite.
+        #    total = gelöst(max sol(p)) + frei(GVF, p)
+        if gvf_location.startswith("Saugseite"):
+            free_s_cm3N_L = free_gas_cm3N_L_from_gvf_pct(gvf_pct, p_suction, temperature, gas_medium)
+            total_cm3N_L = sol_s + free_s_cm3N_L
         else:
-            # Recycling: wir modellieren konservativ "nur gelöst" auf Druckseite (satt) * Anteil
-            frac = (Q_rec / Q_req) if Q_req > 0 else 0.0
-            frac = safe_clamp(frac, 0.0, 5.0)
-            total_cm3N_L = sol_d * frac
+            free_d_cm3N_L = free_gas_cm3N_L_from_gvf_pct(gvf_pct, p_discharge, temperature, gas_medium)
+            total_cm3N_L = sol_d + free_d_cm3N_L
 
-        # Schritt B: Freies Gas an Saugseite aus total vs sol_s
+        # 3) Gelöst / frei an beiden Druckniveaus (rein aus total vs sol(p))
+        dissolved_s_cm3N_L = min(total_cm3N_L, sol_s)
+        dissolved_d_cm3N_L = min(total_cm3N_L, sol_d)
         free_s_cm3N_L = max(0.0, total_cm3N_L - sol_s)
+        free_d_cm3N_L = max(0.0, total_cm3N_L - sol_d)
+
+        # 4) Für Pumpenauswahl verwenden wir die freie Gasphase an der Saugseite (konservativ)
         gvf_s_pct = gvf_pct_from_free_gas_cm3N_L(free_s_cm3N_L, p_suction, temperature, gas_medium)
         gvf_s_pct_safe = gvf_s_pct * (1.0 + safety_factor / 100.0)
-        if free_s_cm3N_L > 0:
-            has_free_gas_suction = True
 
-        # Schritt C: Freies Gas an Druckseite aus total vs sol_d (für Info)
-        free_d_cm3N_L = max(0.0, total_cm3N_L - sol_d)
-        gvf_d_pct = gvf_pct_from_free_gas_cm3N_L(free_d_cm3N_L, p_discharge, temperature, gas_medium)
-        if free_d_cm3N_L > 0:
-            has_free_gas_discharge = True
+        # 5) Gelöst-Anteile in %
+        frac_diss_s = dissolved_fraction(total_cm3N_L, sol_s)
+        frac_diss_d = dissolved_fraction(total_cm3N_L, sol_d)
 
-        # Pumpenauswahl
+        # 6) Pumpenauswahl
         best_pump = None
         if only_dissolved and free_s_cm3N_L > 0:
             best_pump = None
         else:
             best_pump = choose_best_mph_pump(
-                MPH_PUMPS, Q_req, dp_req, gvf_s_pct_safe, nu_liq, rho_liq
+                MPH_PUMPS, Q_pump, dp_req, gvf_s_pct_safe, nu_liq, rho_liq
             )
 
         with right:
-            st.subheader("Ergebnisse")
+            st.subheader("Ergebnisse (übersichtlich)")
+
+            # Kernaussage: wie viel % ist gelöst bei den beiden Drücken?
+            st.markdown("**Gelöst-Anteil des Systemgases** (bezogen auf die konservative System-Gasmenge):")
+            a1, a2 = st.columns(2)
+            a1.metric(f"bei p_s = {p_suction:.2f} bar", f"{frac_diss_s*100:.1f}% gelöst")
+            a2.metric(f"bei p_d = {p_discharge:.2f} bar", f"{frac_diss_d*100:.1f}% gelöst")
 
             c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.metric("Flüssigkeitsstrom", f"{Q_req:.2f} m³/h")
-                st.metric("Δp Anforderung", f"{dp_req:.2f} bar")
-            with c2:
-                st.metric("Löslichkeit Saugseite", f"{sol_s:.1f} cm³N/L")
-                st.metric("Löslichkeit Druckseite", f"{sol_d:.1f} cm³N/L")
-            with c3:
-                st.metric("Gesamtgas (konservativ)", f"{total_cm3N_L:.1f} cm³N/L")
-                st.metric("Freies Gas (Druckseite)", f"{free_d_cm3N_L:.1f} cm³N/L")
-            with c4:
-                st.metric("Freies Gas (Saugseite)", f"{free_s_cm3N_L:.1f} cm³N/L")
-                st.metric("GVF frei (Saugseite, +Sicherheit)", f"{gvf_s_pct_safe:.1f} %")
+            c1.metric("Volumenstrom durch Pumpe", f"{Q_pump:.2f} m³/h")
+            c1.caption("Q_pump = Q_liq" if flow_mode.startswith("Prozess") else "Q_pump = Q_rec (überschreibt Q_liq)")
+            c2.metric("Δp Anforderung", f"{dp_req:.2f} bar")
+            c3.metric("Löslichkeit Saugseite", f"{sol_s:.1f} cm³N/L")
+            c4.metric("Löslichkeit Druckseite", f"{sol_d:.1f} cm³N/L")
 
-            # Verständliche Hinweise:
-            if has_free_gas_suction:
-                st.warning("⚠️ An der Saugseite liegt freie Gasphase vor (total > Löslichkeit bei p_s).")
-            else:
-                st.success("✅ An der Saugseite keine freie Gasphase (total ≤ Löslichkeit bei p_s).")
+            d1, d2, d3, d4 = st.columns(4)
+            d1.metric("Systemgas (konservativ)", f"{total_cm3N_L:.1f} cm³N/L")
+            d2.metric("Gelöst bei Saugseite", f"{dissolved_s_cm3N_L:.1f} cm³N/L")
+            d3.metric("Gelöst bei Druckseite", f"{dissolved_d_cm3N_L:.1f} cm³N/L")
+            d4.metric("GVF_s (frei, +Sicherheit)", f"{gvf_s_pct_safe:.1f} %")
 
-            if has_free_gas_discharge:
-                st.info("ℹ️ An der Druckseite liegt freie Gasphase vor (total > Löslichkeit bei p_d).")
-            else:
-                st.info("ℹ️ An der Druckseite ist alles im Löslichen Bereich (total ≤ Löslichkeit bei p_d).")
+            # Keine Warn-/Info-Meldungen mehr (wie gewünscht)
 
             if only_dissolved and free_s_cm3N_L > 0:
-                st.error("❌ Blockiert: Nur gelöstes Gas zulassen, aber an der Saugseite entsteht freie Gasphase!")
-
-            if best_pump:
-                st.success(f"✅ Empfohlene Pumpe: {best_pump['pump']['id']} (Kennlinie {best_pump['gvf_key']}% GVF)")
-                d1, d2, d3, d4 = st.columns(4)
-                d1.metric("Δp verfügbar", f"{best_pump['dp_avail']:.2f} bar")
-                d2.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
-                d3.metric("Drehzahl", f"{best_pump['n_rpm']:.0f} rpm")
-                d4.metric("Modus", best_pump["mode"])
+                st.error("❌ Nur gelöstes Gas zugelassen, aber aus der konservativen Bilanz ergibt sich freie Gasphase an p_s.")
+                st.caption("Tipp: Entweder Option deaktivieren oder Eingabe/GVF-Referenzseite prüfen.")
             else:
-                st.info("Keine geeignete Mehrphasenpumpe gefunden (oder Auswahl blockiert).")
+                if best_pump:
+                    st.success(f"✅ Empfohlene Pumpe: {best_pump['pump']['id']} (Kennlinie {best_pump['gvf_key']}% GVF)")
+                    e1, e2, e3, e4 = st.columns(4)
+                    e1.metric("Δp verfügbar", f"{best_pump['dp_avail']:.2f} bar")
+                    e2.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
+                    e3.metric("Drehzahl", f"{best_pump['n_rpm']:.0f} rpm")
+                    e4.metric("Modus", best_pump["mode"])
+                else:
+                    st.info("Keine geeignete Mehrphasenpumpe gefunden (oder Auswahl blockiert).")
 
+            # =========================
+            # Diagramme
+            # =========================
             st.subheader("Diagramme")
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
@@ -839,11 +774,12 @@ def run_multi_phase_pump():
                 free_ref = free_gas_cm3N_L_from_gvf_pct(gvf_ref, p_discharge, temperature, gas_medium)
                 total_ref = sol_d + free_ref
                 ax1.axhline(total_ref, linestyle=":", alpha=0.6)
-                ax1.text(13.8, total_ref, f"{gvf_ref}% GVF (Druck) → Gesamtgas", va="center", ha="right", fontsize=9)
+                ax1.text(13.8, total_ref, f"{gvf_ref}% GVF@p_d → Gesamtgas", va="center", ha="right", fontsize=9)
 
-            ax1.scatter([p_suction], [sol_s], s=80, label="Saugseite (löslich)")
-            ax1.scatter([p_discharge], [sol_d], s=80, label="Druckseite (löslich)")
-            ax1.scatter([p_suction], [total_cm3N_L], s=90, marker="x", label="Gesamtgas (System)")
+            # Punkte (klarer)
+            ax1.scatter([p_suction], [sol_s], s=80, label="Löslichkeit @ p_s")
+            ax1.scatter([p_discharge], [sol_d], s=80, label="Löslichkeit @ p_d")
+            ax1.scatter([p_suction], [total_cm3N_L], s=90, marker="x", label="Systemgas (konservativ)")
 
             ax1.set_xlabel("Absolutdruck p [bar]")
             ax1.set_ylabel("Gasgehalt [cm³N/L]")
@@ -856,7 +792,7 @@ def run_multi_phase_pump():
             if best_pump:
                 pump = best_pump["pump"]
                 H_req_m = dp_req * BAR_TO_M_WATER
-                Q_lmin_req = m3h_to_lmin(Q_req)
+                Q_lmin_req = m3h_to_lmin(Q_pump)
 
                 max_Q_lmin, max_H = 0.0, 0.0
                 for gvf_key in sorted(pump["curves_dp_vs_Q"].keys()):
@@ -895,33 +831,29 @@ def run_multi_phase_pump():
                 st.latex(r"V_{m,oper}=\frac{R\cdot T}{p}\cdot Z")
                 st.latex(r"V_{oper} = C\cdot V_{m,oper}")
                 st.latex(r"V_N = V_{oper}\cdot\frac{p}{p_N}\cdot\frac{T_N}{T}\cdot\frac{1}{Z}")
-                st.markdown(f"- p_s = {p_suction:.3f} bar, p_d = {p_discharge:.3f} bar, T = {temperature:.1f}°C")
-                st.markdown(f"- sol_s = {sol_s:.3f} cm³N/L")
-                st.markdown(f"- sol_d = {sol_d:.3f} cm³N/L")
+                st.markdown(f"- sol(p_s) = {sol_s:.3f} cm³N/L, sol(p_d) = {sol_d:.3f} cm³N/L")
 
                 st.markdown("### 2) Freies Gas aus GVF (Umrechnung operativ → Norm)")
                 st.latex(r"V_{gas,oper}=\frac{GVF}{100-GVF}\quad [L/L_{liq}]")
                 st.latex(r"V_{gas,N}=V_{gas,oper}\cdot\frac{p}{p_N}\cdot\frac{T_N}{T}\cdot\frac{1}{Z}")
-                st.markdown("Interpretation: GVF ist **freie Gasphase** (nicht gelöst).")
+                st.markdown(f"- GVF-Eingabe: {gvf_pct:.2f}% @ {('p_s' if gvf_location.startswith('Saug') else 'p_d')}")
 
-                st.markdown("### 3) System-Gesamtgas (konservativ) und freie Gasphase an p_s / p_d")
-                st.latex(r"V_{total,N}\;(\text{konservativ})")
-                st.latex(r"V_{free,N}(p)=\max(0, V_{total,N}-sol(p))")
-                st.latex(r"GVF(p)=\frac{V_{free,oper}(p)}{1+V_{free,oper}(p)}\cdot 100")
+                st.markdown("### 3) Konservative System-Gasmenge")
+                st.latex(r"V_{total,N} = sol(p_{ref}) + V_{free,N}(GVF@p_{ref})")
                 st.markdown(f"- total = {total_cm3N_L:.3f} cm³N/L")
-                st.markdown(f"- free_s = max(0, total - sol_s) = {free_s_cm3N_L:.3f} cm³N/L")
-                st.markdown(f"- free_d = max(0, total - sol_d) = {free_d_cm3N_L:.3f} cm³N/L")
-                st.markdown(f"- GVF_s = {gvf_s_pct:.3f}% → +{safety_factor}% = {gvf_s_pct_safe:.3f}%")
-                st.markdown(f"- GVF_d = {gvf_d_pct:.3f}%")
 
-                st.markdown("### 4) Warum „fast immer freie Gasphase an Saugseite“, wenn GVF_d>0?")
-                st.markdown(
-                    "- Weil **sol(p)** mit Druck steigt.\n"
-                    "- Wenn du an der **Druckseite** freie Gasphase vorgibst, ist das System-Gesamtgas groß.\n"
-                    "- Bei kleinerem p_s ist **sol_s deutlich kleiner** → **total > sol_s** → freie Gasphase an Saugseite.\n"
-                    "Das ist *physikalisch plausibel* (Entspannung → geringere Löslichkeit)."
-                )
-                st.markdown("Wenn du stattdessen GVF als **Saugseitenwert** meinst, stelle oben um auf „Saugseite (freie Gasphase)“.")
+                st.markdown("### 4) Gelöst / frei bei einem Druck p")
+                st.latex(r"V_{diss}(p)=\min\left(V_{total,N},\,sol(p)\right)")
+                st.latex(r"V_{free}(p)=\max\left(0,\,V_{total,N}-sol(p)\right)")
+                st.latex(r"f_{diss}(p)=\frac{V_{diss}(p)}{V_{total,N}}")
+                st.markdown(f"- dissolved@p_s = {dissolved_s_cm3N_L:.3f} cm³N/L → {frac_diss_s*100:.2f}% gelöst")
+                st.markdown(f"- dissolved@p_d = {dissolved_d_cm3N_L:.3f} cm³N/L → {frac_diss_d*100:.2f}% gelöst")
+
+                st.markdown("### 5) Für Pumpenauswahl: GVF an Saugseite (konservativ)")
+                st.latex(r"GVF_s = f\left(V_{free,N}(p_s),\,p_s,\,T,\,Z\right)")
+                st.latex(r"GVF_{s,\,safe}=GVF_s\cdot(1+\text{Sicherheitsfaktor})")
+                st.markdown(f"- GVF_s = {gvf_s_pct:.3f}%")
+                st.markdown(f"- +{safety_factor}% → GVF_s,safe = {gvf_s_pct_safe:.3f}%")
 
     except Exception as e:
         show_error(e, "Mehrphase")
@@ -959,18 +891,10 @@ def run_atex_selection():
 
             if atmosphere == "Staub":
                 st.warning("Staub-Ex (Zone 20/21/22): In diesem Demo-Code sind keine Datensätze hinterlegt.")
-                with st.expander("Rechenweg (ATEX) – mit Formeln"):
-                    st.latex(r"P_{motor,min}=1.15\cdot P_{shaft}")
-                    st.latex(r"T_{surface,max}-\Delta T \ge T_{medium}")
-                    st.markdown("Bitte Motor-/Gerätekategorie für Staub (z. B. II 2D/3D …) ergänzen.")
                 return
 
             if zone == 0:
                 st.warning("Zone 0: In diesem Demo-Code sind keine Datensätze hinterlegt.")
-                with st.expander("Rechenweg (ATEX) – mit Formeln"):
-                    st.latex(r"P_{motor,min}=1.15\cdot P_{shaft}")
-                    st.latex(r"T_{surface,max}-\Delta T \ge T_{medium}")
-                    st.markdown("Zone 0 benötigt i. d. R. Kategorie 1G – bitte Datensätze hinterlegen.")
                 return
 
             suitable = [
@@ -988,9 +912,6 @@ def run_atex_selection():
 
             if not suitable:
                 st.error(f"❌ Kein Motor passt zu Zone {zone} und T={T_medium:.1f}°C (Marge {t_margin} K).")
-                with st.expander("Rechenweg (ATEX) – mit Formeln"):
-                    st.latex(r"P_{motor,min}=1.15\cdot P_{shaft}")
-                    st.latex(r"T_{surface,max}-\Delta T \ge T_{medium}")
                 return
 
             selected = st.radio(
@@ -1000,20 +921,10 @@ def run_atex_selection():
             )
 
             st.success("✅ Gültige Konfiguration gefunden")
-
             with st.expander("Rechenweg (ATEX) – mit Formeln"):
-                st.markdown("### 1) Leistungsreserve & IEC")
                 st.latex(r"P_{motor,min}=1.15\cdot P_{shaft}")
-                st.markdown(f"- P_motor,min = 1.15 · {P_req:.2f} kW = {P_motor_min:.2f} kW")
-                st.markdown(f"- IEC-Stufe = {P_iec:.2f} kW")
-
-                st.markdown("### 2) Temperaturkriterium")
                 st.latex(r"T_{surface,max}-\Delta T \ge T_{medium}")
-                st.markdown(f"- {selected['t_max_surface']:.1f}°C − {t_margin}K = {selected['t_max_surface']-t_margin:.1f}°C ≥ {T_medium:.1f}°C")
-
-                st.markdown("### 3) Kennzeichnung")
                 st.markdown(f"- Kennzeichnung: `{selected['marking']}`")
-                st.markdown(f"- Geeignet für Zone(n): {', '.join(map(str, selected['zone_suitable']))}")
 
     except Exception as e:
         show_error(e, "ATEX")
@@ -1028,10 +939,10 @@ def main():
             page = st.radio(
                 "Seite auswählen:",
                 ["Einphasenpumpen (Viskosität)", "Mehrphasenpumpen", "ATEX-Auslegung"],
-                index=0
+                index=1
             )
             st.divider()
-            st.caption("Hinweis: Eingaben stehen je Seite links im Inhalt (nicht alles in der Sidebar).")
+            st.caption("Mehrphase: entweder Q_liq oder Q_rec (überschreibt).")
 
         if page == "Einphasenpumpen (Viskosität)":
             run_single_phase_pump()
