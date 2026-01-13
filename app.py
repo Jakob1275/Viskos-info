@@ -503,8 +503,8 @@ def run_single_phase_pump():
             colA, colB, colC = st.columns([1, 1, 1])
             with colA:
                 st.subheader("Betriebspunkt (viskos)")
-                Q_vis_req = st.number_input("Förderstrom Q_vis [m³/h]", min_value=0.1, value=40.0, step=1.0)
-                H_vis_req = st.number_input("Förderhöhe H_vis [m]", min_value=0.1, value=35.0, step=1.0)
+                Q_vis_req = st.number_input("Förderstrom Q_vis [m³/h]", min_value=0.1, value=20.0, step=1.0)
+                H_vis_req = st.number_input("Förderhöhe H_vis [m]", min_value=0.1, value=15.0, step=1.0)
             with colB:
                 st.subheader("Medium")
                 medium = st.selectbox("Medium", list(MEDIA.keys()), index=0)
