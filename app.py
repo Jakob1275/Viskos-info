@@ -652,8 +652,8 @@ def run_multi_phase_pump():
             c1, c2, c3 = st.columns([1, 1, 1])
             with c1:
                 st.subheader("Prozessdrücke")
-                p_suction = st.number_input("Absolutdruck Saugseite p_s [bar]", min_value=0.2, value=2.0, step=0.1)
-                p_discharge = st.number_input("Absolutdruck Druckseite p_d [bar]", min_value=0.2, value=10.0, step=0.1)
+                p_suction = st.number_input("Druck Saugseite p_s [bar]", min_value=0.2, value=2.0, step=0.1)
+                p_discharge = st.number_input("Druck Druckseite p_d [bar]", min_value=0.2, value=10.0, step=0.1)
                 dp_req = max(0.0, p_discharge - p_suction)
             with c2:
                 st.subheader("Medium")
@@ -661,10 +661,10 @@ def run_multi_phase_pump():
                 liquid_medium = st.selectbox("Flüssigmedium", list(MEDIA.keys()), index=0)
                 temperature = st.number_input("Temperatur T [°C]", min_value=-10.0, value=20.0, step=1.0)
             with c3:
-                st.subheader("Hydraulischer Volumenstrom durch die Pumpe")
+                st.subheader("Förderstrom")
                 mode = st.radio(
                     "Welche Größe ist vorgegeben?",
-                    ["Prozess-Volumenstrom Q_liq", "Recyclingstrom Q_rec (überschreibt Q_liq)"],
+                    ["Prozess-Förderstrom Q_liq", "Recyclingstrom Q_rec (überschreibt Q_liq)"],
                     index=0
                 )
                 Q_liq = st.number_input("Q_liq [m³/h]", min_value=0.1, value=8.0, step=0.5)
@@ -736,14 +736,14 @@ def run_multi_phase_pump():
             frac_diss_d = 0.0
 
         # =========================
-        # Ergebnisse (sortiert)
+        # Ergebnisse
         # =========================
-        st.subheader("Ergebnisse (übersichtlich)")
+        st.subheader("Ergebnisse")
 
         r1, r2, r3 = st.columns(3)
         with r1:
-            st.metric("Volumenstrom durch Pumpe Q_pump", f"{Q_pump:.2f} m³/h")
-            st.metric("Δp Anforderung", f"{dp_req:.2f} bar")
+            st.metric("Förderstrom", f"{Q_pump:.2f} m³/h")
+            st.metric("Förderhöhe", f"{dp_req:.2f} bar")
         with r2:
             st.metric("Löslichkeit Saugseite (p_s)", f"{sol_s:.1f} cm³N/L")
             st.metric("Löslichkeit Druckseite (p_d)", f"{sol_d:.1f} cm³N/L")
@@ -751,7 +751,7 @@ def run_multi_phase_pump():
             st.metric("Systemgas (konservativ)", f"{total_cm3N_L:.1f} cm³N/L")
             st.metric("GVF_s (frei, +Sicherheit)", f"{gvf_free_s_pct_safe:.1f} %")
 
-        st.markdown("**Gelöst-Anteil des Systemgases (bezogen auf die konservative System-Gasmenge):**")
+        st.subheader("Gelöst-Anteil des Systemgases:")
         g1, g2 = st.columns(2)
         with g1:
             st.metric(f"bei p_s = {p_suction:.2f} bar", f"{frac_diss_s:.1f}% gelöst")
