@@ -735,7 +735,7 @@ def run_multi_phase_pump():
         r1, r2, r3, r4 = st.columns(4)
         with r1:
             st.metric("Förderstrom", f"{Q_pump:.2f} m³/h")
-            st.metric("Δp", f"{dp_req:.2f} bar")
+            st.metric("Förderhöhe (Δp)", f"{dp_req:.2f} bar")
         with r2:
             st.metric("C_sat @ p_s", f"{C_sat_s:.1f} Ncm³/L")
             st.metric("C_sat @ p_d", f"{C_sat_d:.1f} Ncm³/L")
