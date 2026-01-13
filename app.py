@@ -76,7 +76,7 @@ REAL_GAS_FACTORS = {
 # So bleibt "Wasser" auch wirklich Wasser.
 PUMPS = [
     {
-        "id": "P1 (Edur LBU Beispiel)",
+        "id": "P1",
         "Qw": [0, 10, 20, 30, 40, 50],          # m³/h
         "Hw": [30, 29, 27, 24, 20, 15],         # m
         "eta": [0.35, 0.55, 0.65, 0.62, 0.55, 0.45],  # -
@@ -88,7 +88,7 @@ PUMPS = [
 
 MPH_PUMPS = [
     {
-        "id": "MPH-40 (Edur MPH 40)",
+        "id": "MPH-40",
         "type": "Mehrphasenpumpe",
         "Q_max_m3h": 40,
         "dp_max_bar": 12,
