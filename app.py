@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore", category=UserWarning)
 
 st.set_page_config(page_title="Pumpenauslegung", layout="wide", page_icon="🔧")
-
 DEBUG = True
 
 # =========================
@@ -43,7 +42,7 @@ HENRY_CONSTANTS = {
     "H2S": {"A": 10.0, "B": 2100, "MW": 34.08},
 }
 
-# sehr einfache Z-Approximation (nur Trend/Stabilität)
+# Einfache Z-Approx (nur Trend/Stabilität)
 REAL_GAS_FACTORS = {
     "Luft": lambda p, T: max(0.85, 1.0 - 0.00008 * p),
     "Methan (CH4)": lambda p, T: max(0.80, 1.0 - 0.00015 * p),
@@ -55,7 +54,7 @@ REAL_GAS_FACTORS = {
 # =========================
 PUMPS = [
     {
-        "id": "P1",
+        "id": "P1 (Edur LBU 2…)",
         "Qw": [0, 10, 20, 30, 40, 50],
         "Hw": [30, 29, 27, 24, 20, 15],
         "eta": [0.35, 0.55, 0.65, 0.62, 0.55, 0.45],
@@ -66,7 +65,7 @@ PUMPS = [
 
 MPH_PUMPS = [
     {
-        "id": "MPH-40",
+        "id": "MPH-40 (Edur MPH 40)",
         "Q_max_m3h": 40,
         "dp_max_bar": 12,
         "GVF_max": 0.4,
@@ -90,6 +89,9 @@ MPH_PUMPS = [
     },
 ]
 
+# =========================
+# ATEX Datensätze (Demo)
+# =========================
 ATEX_MOTORS = [
     {
         "id": "Standard Zone 2 (Ex ec)",
@@ -99,6 +101,19 @@ ATEX_MOTORS = [
         "t_max_surface": 200.0,
         "category": "3G",
         "efficiency_class": "IE3",
+        "gas_group": "IIC",
+        "protection": "Ex ec",
+    },
+    {
+        "id": "Zone 1 (Ex db eb)",
+        "marking": "II 2G Ex db eb IIC T4 Gb",
+        "zone_suitable": [1, 2],
+        "temp_class": "T4",
+        "t_max_surface": 135.0,
+        "category": "2G",
+        "efficiency_class": "IE3",
+        "gas_group": "IIC",
+        "protection": "Ex db eb",
     },
 ]
 
@@ -133,6 +148,9 @@ def safe_interp(x, xp, fp):
             return fp[i] + (fp[i + 1] - fp[i]) * (x - xp[i]) / (xp[i + 1] - xp[i])
     return fp[-1]
 
+def m3h_to_lmin(m3h):
+    return float(m3h) * 1000.0 / 60.0
+
 def motor_iec(P_kW):
     steps = [0.12, 0.18, 0.25, 0.37, 0.55, 0.75, 1.1, 1.5, 2.2, 3.0, 4.0, 5.5,
              7.5, 11, 15, 18.5, 22, 30, 37, 45, 55, 75, 90, 110, 132, 160, 200]
@@ -141,11 +159,8 @@ def motor_iec(P_kW):
             return s
     return steps[-1]
 
-def m3h_to_lmin(m3h):
-    return float(m3h) * 1000.0 / 60.0
-
 # =========================
-# HI Viskosität (robust / Demo)
+# Viskosität / HI (robust)
 # =========================
 def compute_B_HI(Q_m3h, H_m, nu_cSt):
     Q = max(float(Q_m3h), 1e-6)
@@ -168,7 +183,6 @@ def viscosity_correction_factors(B):
 def viscous_to_water_point(Q_vis_m3h, H_vis_m, nu_cSt):
     B = compute_B_HI(Q_vis_m3h, H_vis_m, nu_cSt)
     CH, Ceta = viscosity_correction_factors(B)
-    # vereinfachend: Q_w ~ Q_vis
     Q_water = float(Q_vis_m3h)
     H_water = float(H_vis_m) / max(CH, 1e-9)
     return {"Q_water": Q_water, "H_water": H_water, "B": B, "CH": CH, "Ceta": Ceta}
@@ -192,6 +206,48 @@ def generate_viscous_curve(pump, nu_cSt, rho):
 
     return Qw.tolist(), H_vis, eta_vis, P_vis
 
+# Root + Drehzahl-Optimierung (wie vorher)
+def bisect_root(f, a, b, it=80, tol=1e-6):
+    fa = f(a)
+    fb = f(b)
+    if not (np.isfinite(fa) and np.isfinite(fb)):
+        return None
+    if fa == 0:
+        return a
+    if fb == 0:
+        return b
+    if fa * fb > 0:
+        return None
+    lo, hi = a, b
+    flo, fhi = fa, fb
+    for _ in range(it):
+        mid = 0.5 * (lo + hi)
+        fm = f(mid)
+        if not np.isfinite(fm):
+            return None
+        if abs(fm) < tol:
+            return mid
+        if flo * fm <= 0:
+            hi, fhi = mid, fm
+        else:
+            lo, flo = mid, fm
+    return 0.5 * (lo + hi)
+
+def find_speed_ratio(Q_curve, H_curve, Q_req, H_req, n_min=0.5, n_max=1.2):
+    Q_curve = list(map(float, Q_curve))
+    H_curve = list(map(float, H_curve))
+    Q_req = float(Q_req)
+    H_req = float(H_req)
+
+    def f(nr):
+        if nr <= 0:
+            return 1e9
+        Q_base = Q_req / nr
+        H_base = safe_interp(Q_base, Q_curve, H_curve)
+        return (H_base * (nr ** 2)) - H_req
+
+    return bisect_root(f, float(n_min), float(n_max), it=120, tol=1e-5)
+
 # =========================
 # Gas / Löslichkeit / GVF
 # =========================
@@ -208,34 +264,21 @@ def real_gas_factor(gas, p_bar, T_celsius):
     return 1.0
 
 def gas_solubility_cm3N_per_L(gas, p_bar_abs, T_celsius, y_gas=1.0):
-    """
-    Henry (vereinfachend):
-      C_mol/L = p_part / H
-      -> umgerechnet in cm³N/L
-    """
     p = max(float(p_bar_abs), 1e-6)
     T_K = float(T_celsius) + 273.15
     H = max(henry_constant(gas, T_celsius), 1e-12)
     Z = max(real_gas_factor(gas, p, T_celsius), 0.5)
     p_part = safe_clamp(float(y_gas), 0.0, 1.0) * p
 
-    C_mol_L = p_part / H  # mol/L (vereinfacht)
+    C_mol_L = p_part / H  # mol/L
 
-    # Molvolumen oper (mit Z)
     V_molar_oper = (R_BAR_L * T_K) / p * Z  # L/mol
-    V_oper_L_per_L = C_mol_L * V_molar_oper  # L_gas_oper / L_liq
+    V_oper_L_per_L = C_mol_L * V_molar_oper
 
-    # oper -> normal
     ratio = (p / P_N_BAR) * (T_N_K / T_K) * (1.0 / Z)
     return V_oper_L_per_L * ratio * 1000.0  # cm³N/L
 
 def free_gas_cm3N_L_from_gvf_pct(gvf_pct, p_bar_abs, T_celsius, gas):
-    """
-    GVF% = freie Gasphase (operativ, Volumenanteil).
-    Umrechnung in cm³N/L bezogen auf Flüssigkeitsvolumen:
-      Vgas_oper(L/Lliq) = gvf/(100-gvf)
-      Vn(L/Lliq) = Voper * (p/Pn)*(Tn/T)*(1/Z)
-    """
     gvf_pct = safe_clamp(float(gvf_pct), 0.0, 99.0)
     p = max(float(p_bar_abs), 0.1)
     T_K = float(T_celsius) + 273.15
@@ -247,9 +290,6 @@ def free_gas_cm3N_L_from_gvf_pct(gvf_pct, p_bar_abs, T_celsius, gas):
     return Vn_L_per_L * 1000.0  # cm³N/L
 
 def gvf_pct_from_free_gas_cm3N_L(free_cm3N_L, p_bar_abs, T_celsius, gas):
-    """
-    freies Gas (cm³N/L) -> GVF% operativ (bezogen auf Gesamtvolumen)
-    """
     free_cm3N_L = max(float(free_cm3N_L), 0.0)
     p = max(float(p_bar_abs), 0.1)
     T_K = float(T_celsius) + 273.15
@@ -262,11 +302,7 @@ def gvf_pct_from_free_gas_cm3N_L(free_cm3N_L, p_bar_abs, T_celsius, gas):
     gvf = (Vgas_oper_L_per_Lliq / (1.0 + Vgas_oper_L_per_Lliq)) * 100.0
     return safe_clamp(gvf, 0.0, 99.0)
 
-def solubility_curve_total_with_gvf(gas, T_celsius, gvf_pct, p_min=0.2, p_max=14.0, n=160):
-    """
-    Physikalisch konsistente Referenzkurve:
-      C_ref(p) = S(p,T) + free_from_gvf(gvf,p,T)
-    """
+def solubility_curve_total_with_gvf(gas, T_celsius, gvf_pct, p_min=0.2, p_max=14.0, n=200):
     ps = np.linspace(p_min, p_max, n)
     sol = np.array([gas_solubility_cm3N_per_L(gas, p, T_celsius) for p in ps], dtype=float)
     free = np.array([free_gas_cm3N_L_from_gvf_pct(gvf_pct, p, T_celsius, gas) for p in ps], dtype=float)
@@ -300,34 +336,8 @@ def choose_best_pump(pumps, Q_req, H_req, nu_cSt, rho):
     return best
 
 # =========================
-# Pump selection (Mehrphase) inkl. Drehzahl
+# Pump selection (Mehrphase)
 # =========================
-def bisect_root(f, a, b, it=70, tol=1e-6):
-    fa = f(a)
-    fb = f(b)
-    if not (np.isfinite(fa) and np.isfinite(fb)):
-        return None
-    if fa == 0:
-        return a
-    if fb == 0:
-        return b
-    if fa * fb > 0:
-        return None
-    lo, hi = a, b
-    flo, fhi = fa, fb
-    for _ in range(it):
-        mid = 0.5 * (lo + hi)
-        fm = f(mid)
-        if not np.isfinite(fm):
-            return None
-        if abs(fm) < tol:
-            return mid
-        if flo * fm <= 0:
-            hi, fhi = mid, fm
-        else:
-            lo, flo = mid, fm
-    return 0.5 * (lo + hi)
-
 def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_suction_free_pct_safe, nu_cSt, rho_liq,
                         n_min_ratio=0.5, n_max_ratio=1.2):
     best = None
@@ -363,7 +373,7 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_suction_free_pct_safe
             return dp_at_ratio(nr) - dp_req
 
         dp_nom = safe_interp(Q_req, Qc, dpc) if (min(Qc) <= Q_req <= max(Qc)) else None
-        n_ratio = bisect_root(f, n_min_ratio, n_max_ratio, it=80, tol=1e-4)
+        n_ratio = bisect_root(f, n_min_ratio, n_max_ratio, it=120, tol=1e-4)
 
         candidates = []
 
@@ -400,9 +410,9 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_suction_free_pct_safe
 # =========================
 def run_single_phase_pump():
     try:
-        st.header("Einphasenpumpen mit Viskositätskorrektur")
+        st.header("Einphasenpumpen – Viskosität (inkl. Drehzahlanpassung)")
 
-        # Eingaben kompakt oben
+        # Eingaben oben
         cA, cB, cC, cD = st.columns(4)
         with cA:
             Q_vis_req = st.number_input("Betriebspunkt Q_vis [m³/h]", min_value=0.1, value=20.0, step=0.5)
@@ -414,6 +424,14 @@ def run_single_phase_pump():
             nu = st.number_input("ν [cSt]", min_value=0.1, value=float(MEDIA[medium]["nu"]), step=0.1)
 
         rho = float(MEDIA[medium]["rho"])
+
+        opt1, opt2, opt3 = st.columns(3)
+        with opt1:
+            reserve_pct = st.slider("Motorreserve [%]", 0, 30, 15)
+        with opt2:
+            n_min = st.slider("n_min/n0", 0.4, 1.0, 0.6, 0.01)
+        with opt3:
+            n_max = st.slider("n_max/n0", 1.0, 1.6, 1.2, 0.01)
 
         conv = viscous_to_water_point(Q_vis_req, H_vis_req, nu)
         Q_water = conv["Q_water"]
@@ -431,9 +449,28 @@ def run_single_phase_pump():
 
         P_hyd_W = rho * G * (Q_vis_req / 3600.0) * H_vis_req
         P_vis_kW = (P_hyd_W / max(eta_vis, 1e-9)) / 1000.0
-        P_motor_kW = motor_iec(P_vis_kW * 1.15)
+        P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
 
+        # Kennlinien viskos
         Q_vis_curve, H_vis_curve, eta_vis_curve, P_vis_curve = generate_viscous_curve(pump, nu, rho)
+
+        # Drehzahl-Anpassung: n so wählen, dass viskose Kennlinie den Betriebspunkt trifft
+        n_ratio_opt = find_speed_ratio(Q_vis_curve, H_vis_curve, Q_vis_req, H_vis_req, n_min, n_max)
+
+        n_opt_rpm = None
+        P_opt_kW = None
+        saving_pct = None
+        P_nom_at_Q = safe_interp(Q_vis_req, Q_vis_curve, P_vis_curve)
+
+        if n_ratio_opt is not None:
+            n_opt_rpm = N0_RPM_DEFAULT * n_ratio_opt
+            Q_base = Q_vis_req / n_ratio_opt
+            P_base = safe_interp(Q_base, Q_vis_curve, P_vis_curve)
+            P_opt_kW = float(P_base) * (n_ratio_opt ** 3)
+            if P_nom_at_Q > 1e-9:
+                saving_pct = (P_nom_at_Q - P_opt_kW) / P_nom_at_Q * 100.0
+            else:
+                saving_pct = 0.0
 
         st.subheader("Ergebnisse")
         col1, col2, col3, col4 = st.columns(4)
@@ -448,13 +485,26 @@ def run_single_phase_pump():
             st.metric("H_wasser (Umrechnung)", f"{H_water:.2f} m")
         with col4:
             st.metric("Wellenleistung", f"{P_vis_kW:.2f} kW")
-            st.metric("Motor (IEC, +15%)", f"{P_motor_kW:.2f} kW")
+            st.metric("Motor (+Reserve)", f"{P_motor_kW:.2f} kW")
+
+        if n_ratio_opt is not None and P_opt_kW is not None and saving_pct is not None:
+            d1, d2 = st.columns(2)
+            with d1:
+                st.metric("Optimale Drehzahl", f"{n_opt_rpm:.0f} rpm")
+            with d2:
+                st.metric("Energieeinsparung ggü. n0", f"{saving_pct:.1f}%")
+        else:
+            st.info("Keine gültige Drehzahl-Anpassung im gewählten Bereich gefunden.")
 
         st.subheader("Kennlinien")
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
         ax1.plot(pump["Qw"], pump["Hw"], "o-", label="Wasser (n0)")
         ax1.plot(Q_vis_curve, H_vis_curve, "s--", label="Viskos (n0)")
+        if n_ratio_opt is not None:
+            Q_scaled = [q * n_ratio_opt for q in Q_vis_curve]
+            H_scaled = [h * (n_ratio_opt ** 2) for h in H_vis_curve]
+            ax1.plot(Q_scaled, H_scaled, ":", label=f"Viskos (n≈{n_opt_rpm:.0f} rpm)")
         ax1.scatter([Q_water], [best["H_at"]], marker="^", s=90, label="BP (Wasser)")
         ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=90, label="BP (viskos)")
         ax1.set_xlabel("Q [m³/h]")
@@ -472,11 +522,15 @@ def run_single_phase_pump():
         ax2.grid(True)
         ax2.legend()
 
-        ax3.plot(Q_vis_curve, P_vis_curve, "s--", label="Viskos P (berechnet)")
+        ax3.plot(Q_vis_curve, P_vis_curve, "s--", label="Viskos P (n0, berechnet)")
+        if n_ratio_opt is not None:
+            P_scaled = [p * (n_ratio_opt ** 3) for p in P_vis_curve]
+            Q_scaled = [q * n_ratio_opt for q in Q_vis_curve]
+            ax3.plot(Q_scaled, P_scaled, ":", label=f"Viskos P (n≈{n_opt_rpm:.0f} rpm)")
         ax3.scatter([Q_vis_req], [P_vis_kW], marker="x", s=90, label="BP (viskos)")
         ax3.set_xlabel("Q [m³/h]")
         ax3.set_ylabel("P [kW]")
-        ax3.set_title("Q-P (viskos)")
+        ax3.set_title("Q-P")
         ax3.grid(True)
         ax3.legend()
 
@@ -504,24 +558,35 @@ def run_single_phase_pump():
             st.markdown("## 4) Leistung")
             st.latex(r"P_{\mathrm{hyd}} = \rho g Q H")
             st.latex(r"P_{\mathrm{Welle}} = \frac{P_{\mathrm{hyd}}}{\eta_{\mathrm{vis}}}")
-            st.markdown(f"- ρ={rho:.1f} kg/m³, g={G:.5f} m/s²")
             st.markdown(f"- P_hyd={P_hyd_W:.1f} W, η_vis={eta_vis:.4f}")
-            st.markdown(f"- P_Welle={P_vis_kW:.3f} kW, Motor IEC(+15%)={P_motor_kW:.2f} kW")
+            st.markdown(f"- P_Welle(n0)≈{P_vis_kW:.3f} kW")
+
+            st.markdown("## 5) Drehzahlanpassung (Affinity Laws)")
+            st.latex(r"Q \propto n,\qquad H \propto n^2,\qquad P \propto n^3")
+            st.latex(r"H(n) = H(n_0)\cdot \left(\frac{n}{n_0}\right)^2")
+            st.markdown("- Gesucht: n/n0 so, dass die viskose Kennlinie den Betriebspunkt trifft.")
+            if n_ratio_opt is not None and P_opt_kW is not None and saving_pct is not None:
+                st.markdown(f"- n/n0={n_ratio_opt:.4f} → n_opt={n_opt_rpm:.0f} rpm")
+                st.markdown(f"- P(n0)@Q={P_nom_at_Q:.3f} kW")
+                st.markdown(f"- P_opt≈{P_opt_kW:.3f} kW → Einsparung≈{saving_pct:.1f}%")
+            else:
+                st.markdown("- Keine Lösung im Bereich n_min…n_max gefunden.")
 
     except Exception as e:
         show_error(e, "Einphasenpumpen")
 
+
 def run_multi_phase_pump():
     """
-    NEUE Prozesslogik:
-    - Es wird vor der Pumpe Gas zugemischt (freie Phase), angegeben als GVF_in an Saugseite.
-    - Durch Druckerhöhung geht (ein Teil) in Lösung.
-    - Ergebnis: Gelöst-Anteil bei p_s und p_d + ggf. Rest freie Gasphase am Austritt.
+    Zielprozess:
+    - Gas wird VOR der Pumpe zugesetzt (freie Phase am Eintritt).
+    - Durch Druckerhöhung geht Gas in Lösung.
+    - Zielwert-Modus: Am Austritt (p_d) soll ein vorgegebener gelöster Gasanteil erreicht werden (ideal: ohne freies Gas dort).
     """
     try:
-        st.header("Mehrphasenpumpen-Auslegung (Gaszugabe vor der Pumpe)")
+        st.header("Mehrphasenpumpen – Gaszugabe vor der Pumpe (inkl. Zielwert-Modus)")
 
-        # --- Eingaben klar und kompakt (oben)
+        # Prozessdrücke + Medien
         top1, top2, top3, top4 = st.columns(4)
         with top1:
             p_suction = st.number_input("Absolutdruck Saugseite p_s [bar]", min_value=0.2, value=2.0, step=0.1)
@@ -540,54 +605,90 @@ def run_multi_phase_pump():
 
         st.divider()
         st.subheader("Hydraulischer Volumenstrom durch die Pumpe (nur EIN Input aktiv)")
-
         flow_mode = st.radio(
             "Welche Größe ist vorgegeben?",
             ["Prozess-Volumenstrom Q_liq", "Recyclingstrom Q_rec (überschreibt Q_liq)"],
-            index=0,
-            horizontal=False
+            index=0
         )
         if flow_mode == "Prozess-Volumenstrom Q_liq":
             Q_liq = st.number_input("Q_liq [m³/h]", min_value=0.1, value=8.0, step=0.5)
-            Q_rec = None
             Q_pump = float(Q_liq)
             flow_note = "Q_pump = Q_liq"
         else:
             Q_rec = st.number_input("Q_rec [m³/h]", min_value=0.1, value=12.0, step=0.5)
-            Q_liq = None
             Q_pump = float(Q_rec)
             flow_note = "Q_pump = Q_rec (überschreibt Q_liq)"
 
-        st.divider()
-        st.subheader("Gaszugabe vor der Pumpe (freie Gasphase als GVF_in)")
-
-        gvf_in_pct = st.slider("GVF_in an Saugseite (frei) [%]", 0.0, 40.0, 10.0, 0.1)
-        safety_factor = st.slider("Sicherheitsfaktor GVF [%]", 0, 20, 10)
-
-        # 1) Löslichkeiten
+        # Löslichkeiten
         sol_s = gas_solubility_cm3N_per_L(gas_medium, p_suction, temperature)
         sol_d = gas_solubility_cm3N_per_L(gas_medium, p_discharge, temperature)
 
-        # 2) Freies Gas am Eintritt aus GVF_in
-        free_s_cm3N_L = free_gas_cm3N_L_from_gvf_pct(gvf_in_pct, p_suction, temperature, gas_medium)
+        st.divider()
+        st.subheader("Gasvorgabe VOR der Pumpe")
+        gas_mode = st.radio(
+            "Eingabemodus:",
+            ["GVF_in an Saugseite (frei) [%]", "Zielwert-Modus: gelöst am Austritt (p_d)"],
+            index=1
+        )
 
-        # 3) Gesamtgas im System vor der Pumpe (konservativ: Eintrittsseite gesättigt + freie Phase)
-        C_total = sol_s + free_s_cm3N_L
+        safety_factor = st.slider("Sicherheitsfaktor GVF [%]", 0, 20, 10)
 
-        # 4) Austritt: gelöst bis zur Löslichkeit bei p_d
+        # Variablen, die wir in beiden Modi füllen
+        gvf_in_pct = 0.0
+        free_s_cm3N_L = 0.0
+        C_total = 0.0
+        target_note = ""
+
+        if gas_mode.startswith("GVF_in"):
+            gvf_in_pct = st.slider("GVF_in an Saugseite (frei) [%]", 0.0, 40.0, 10.0, 0.1)
+            free_s_cm3N_L = free_gas_cm3N_L_from_gvf_pct(gvf_in_pct, p_suction, temperature, gas_medium)
+            # konservativ: Eintritt gesättigt + freie Phase
+            C_total = sol_s + free_s_cm3N_L
+            target_note = "Direktvorgabe: GVF_in (freie Gasphase) an der Saugseite."
+
+        else:
+            target_kind = st.radio(
+                "Zielwert-Definition am Austritt (p_d):",
+                ["% der Löslichkeit S(p_d)", "Absolut gelöst [cm³N/L]"],
+                index=0,
+                horizontal=True
+            )
+            if target_kind.startswith("%"):
+                target_pct = st.slider("Ziel: gelöst am Austritt [% von S(p_d)]", 0.0, 100.0, 100.0, 0.5)
+                C_target = sol_d * (target_pct / 100.0)
+            else:
+                C_target = st.number_input("Ziel: gelöst am Austritt [cm³N/L]", min_value=0.0, value=float(sol_d), step=5.0)
+
+            # Plausibilität: mehr als S(p_d) kann nicht gelöst sein
+            if C_target > sol_d + 1e-9:
+                st.error("Zielwert > Löslichkeit bei p_d. Das ist physikalisch nicht erreichbar (ohne andere Annahmen).")
+                C_target = sol_d
+
+            # Ziel: am Austritt soll alles gelöst sein -> kein freies Gas dort -> C_total = C_target
+            C_total = C_target
+
+            # benötigtes freies Gas am Eintritt:
+            free_s_cm3N_L = max(0.0, C_total - sol_s)
+            gvf_in_pct = gvf_pct_from_free_gas_cm3N_L(free_s_cm3N_L, p_suction, temperature, gas_medium)
+
+            target_note = "Zielwert-Modus: Gaszugabe so berechnet, dass am Austritt der Zielwert gelöst ist (frei_d≈0)."
+
+            # Warnung, wenn GVF sehr hoch
+            if gvf_in_pct >= 40.0:
+                st.warning("Der berechnete GVF_in ist sehr hoch. Prüfe Prozessannahmen / Gasquelle / Mischer / Pumpenlimit.")
+
+        # Was passiert am Austritt?
         dissolved_s = min(C_total, sol_s)
         dissolved_d = min(C_total, sol_d)
         free_d = max(0.0, C_total - sol_d)
 
-        # 5) Prozent gelöst
         frac_diss_s = dissolved_fraction(C_total, sol_s)
         frac_diss_d = dissolved_fraction(C_total, sol_d)
 
-        # 6) GVF an Saugseite (frei) aus freiem Gas (sollte ~ gvf_in sein, als Konsistenzcheck)
+        # Für Pumpenauswahl: konservativ GVF an Saugseite aus freiem Gas
         gvf_s_pct = gvf_pct_from_free_gas_cm3N_L(free_s_cm3N_L, p_suction, temperature, gas_medium)
         gvf_s_pct_safe = gvf_s_pct * (1.0 + safety_factor / 100.0)
 
-        # 7) Pumpenauswahl
         best_pump = choose_best_mph_pump(
             MPH_PUMPS, Q_pump, dp_req, gvf_s_pct_safe, nu_liq, rho_liq
         )
@@ -596,10 +697,12 @@ def run_multi_phase_pump():
         # Ergebnisse
         # =========================
         st.subheader("Ergebnisse (übersichtlich)")
+        st.caption(target_note)
+        st.caption(flow_note)
 
         a1, a2 = st.columns(2)
         with a1:
-            st.markdown("### Gelöst-Anteil des zugegebenen Systemgases")
+            st.markdown("### Gelöst-Anteil des Systemgases")
             st.metric(f"bei p_s = {p_suction:.2f} bar", f"{frac_diss_s*100:.1f}% gelöst")
         with a2:
             st.metric(f"bei p_d = {p_discharge:.2f} bar", f"{frac_diss_d*100:.1f}% gelöst")
@@ -607,16 +710,24 @@ def run_multi_phase_pump():
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Volumenstrom durch Pumpe", f"{Q_pump:.2f} m³/h")
-            st.caption(flow_note)
-        with col2:
             st.metric("Δp Anforderung", f"{dp_req:.2f} bar")
-            st.metric("Löslichkeit Saugseite", f"{sol_s:.1f} cm³N/L")
+        with col2:
+            st.metric("Löslichkeit Saugseite S(p_s)", f"{sol_s:.1f} cm³N/L")
+            st.metric("Löslichkeit Druckseite S(p_d)", f"{sol_d:.1f} cm³N/L")
         with col3:
-            st.metric("Löslichkeit Druckseite", f"{sol_d:.1f} cm³N/L")
-            st.metric("Systemgas gesamt", f"{C_total:.1f} cm³N/L")
+            st.metric("Systemgas gesamt C_total", f"{C_total:.1f} cm³N/L")
+            st.metric("GVF_in (berechnet/vorgegeben)", f"{gvf_in_pct:.2f} %")
         with col4:
-            st.metric("GVF_s (frei, +Sicherheit)", f"{gvf_s_pct_safe:.2f} %")
+            st.metric("Freies Gas am Eintritt", f"{free_s_cm3N_L:.1f} cm³N/L")
             st.metric("Freies Gas am Austritt", f"{free_d:.1f} cm³N/L")
+
+        # Aussage wie viel % Gas bei dem entsprechenden Druck gelöst wird
+        st.info(
+            f"Bei p_s={p_suction:.2f} bar sind {frac_diss_s*100:.1f}% des Systemgases gelöst "
+            f"(={dissolved_s:.1f} cm³N/L). "
+            f"Bei p_d={p_discharge:.2f} bar sind {frac_diss_d*100:.1f}% gelöst "
+            f"(={dissolved_d:.1f} cm³N/L)."
+        )
 
         if best_pump:
             st.success(f"✅ Empfohlene Pumpe: {best_pump['pump']['id']} (Kennlinie {best_pump['gvf_key']}% GVF)")
@@ -638,28 +749,28 @@ def run_multi_phase_pump():
         st.subheader("Diagramme")
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
-        # Links: Löslichkeit + Referenzkurven GVF (als Kurven über p!)
-        ps = np.linspace(0.2, 14.0, 200)
+        # Links: Löslichkeit + physikalisch konsistente Referenzkurven GVF (als Kurven über p)
+        ps = np.linspace(0.2, 14.0, 220)
         sol_curve = np.array([gas_solubility_cm3N_per_L(gas_medium, p, temperature) for p in ps], dtype=float)
-        ax1.plot(ps, sol_curve, "--", label=f"Löslichkeit (T={temperature:.0f}°C)")
+        ax1.plot(ps, sol_curve, "--", label=f"Löslichkeit S(p) (T={temperature:.0f}°C)")
 
         for gvf_ref in [10, 15, 20]:
-            p_ref, total_ref = solubility_curve_total_with_gvf(gas_medium, temperature, gvf_ref, p_min=0.2, p_max=14.0, n=200)
-            ax1.plot(p_ref, total_ref, ":", alpha=0.8, label=f"{gvf_ref}% GVF (frei) + Löslich")
+            p_ref, total_ref = solubility_curve_total_with_gvf(gas_medium, temperature, gvf_ref, p_min=0.2, p_max=14.0, n=220)
+            ax1.plot(p_ref, total_ref, ":", alpha=0.8, label=f"S(p)+frei@{gvf_ref}%GVF")
 
-        # Punkte
+        # Punkte: Saug/Druck & C_total
         ax1.scatter([p_suction], [sol_s], s=80, label="S(p_s)")
         ax1.scatter([p_discharge], [sol_d], s=80, label="S(p_d)")
-        ax1.scatter([p_suction], [C_total], s=90, marker="x", label="Systemgas vor Pumpe (C_total)")
+        ax1.scatter([p_suction], [C_total], s=90, marker="x", label="C_total (Systemgas)")
 
         ax1.set_xlabel("Absolutdruck [bar]")
         ax1.set_ylabel("Gasgehalt [cm³N/L]")
-        ax1.set_title(f"Gaslöslichkeit & GVF-Referenzkurven: {gas_medium}")
+        ax1.set_title(f"Gaslöslichkeit & GVF-Referenz: {gas_medium}")
         ax1.grid(True)
         ax1.legend()
         ax1.set_xlim(0, 14)
 
-        # Rechts: Pumpenkennlinien (als Förderhöhe)
+        # Rechts: Pumpenkennlinien als Förderhöhe
         if best_pump:
             pump = best_pump["pump"]
             Q_lmin_req = m3h_to_lmin(Q_pump)
@@ -703,59 +814,183 @@ def run_multi_phase_pump():
             st.markdown("## 1) Löslichkeit (Henry → cm³N/L)")
             st.latex(r"C_{\mathrm{mol/L}}=\frac{p_{\mathrm{part}}}{H(T)}")
             st.latex(r"V_{\mathrm{oper}}=\frac{R\;T}{p}\;Z")
-            st.latex(r"C_{\mathrm{cm^3N/L}} = (C_{\mathrm{mol/L}}\cdot V_{\mathrm{oper}})\cdot\frac{p}{p_N}\cdot\frac{T_N}{T}\cdot\frac{1}{Z}\cdot 1000")
-            st.markdown(f"- p_s={p_suction:.3f} bar → S(p_s)={sol_s:.3f} cm³N/L")
-            st.markdown(f"- p_d={p_discharge:.3f} bar → S(p_d)={sol_d:.3f} cm³N/L")
+            st.latex(
+                r"C_{\mathrm{cm^3N/L}} = (C_{\mathrm{mol/L}}\cdot V_{\mathrm{oper}})\cdot"
+                r"\frac{p}{p_N}\cdot\frac{T_N}{T}\cdot\frac{1}{Z}\cdot 1000"
+            )
+            st.markdown(f"- S(p_s)={sol_s:.2f} cm³N/L, S(p_d)={sol_d:.2f} cm³N/L")
 
-            st.markdown("## 2) Gaszugabe vor der Pumpe (GVF_in → freies Gas in cm³N/L)")
+            st.markdown("## 2) Gaszugabe am Eintritt (GVF_in → freies Gas in cm³N/L)")
             st.latex(r"V_{g,\mathrm{oper}}=\frac{GVF_{in}}{100-GVF_{in}}")
-            st.latex(r"C_{s,\mathrm{free,N}}=V_{g,\mathrm{oper}}\cdot\frac{p_s}{p_N}\cdot\frac{T_N}{T}\cdot\frac{1}{Z}\cdot 1000")
-            st.markdown(f"- GVF_in={gvf_in_pct:.2f}% → freies Gas am Eintritt = {free_s_cm3N_L:.2f} cm³N/L")
+            st.latex(
+                r"C_{s,\mathrm{free,N}}=V_{g,\mathrm{oper}}\cdot\frac{p_s}{p_N}\cdot"
+                r"\frac{T_N}{T}\cdot\frac{1}{Z}\cdot 1000"
+            )
+            st.markdown(f"- GVF_in={gvf_in_pct:.2f}% → C_free,s={free_s_cm3N_L:.2f} cm³N/L")
 
-            st.markdown("## 3) Systemgas vor der Pumpe (konservativ)")
-            st.latex(r"C_{\mathrm{tot}} = S(p_s,T) + C_{s,\mathrm{free,N}}")
-            st.markdown(f"- C_total = {sol_s:.2f} + {free_s_cm3N_L:.2f} = {C_total:.2f} cm³N/L")
+            st.markdown("## 3) Systemgas vor der Pumpe")
+            st.latex(r"C_{\mathrm{tot}} = S(p_s,T) + C_{s,\mathrm{free,N}} \quad (\text{konservativ})")
+            st.markdown(f"- C_total={C_total:.2f} cm³N/L")
 
-            st.markdown("## 4) Austritt: gelöst + ggf. Rest frei")
+            st.markdown("## 4) Austritt: gelöst + ggf. frei")
             st.latex(r"C_{d,\mathrm{sol}}=\min(C_{\mathrm{tot}},\,S(p_d,T))")
             st.latex(r"C_{d,\mathrm{free}}=\max(0,\,C_{\mathrm{tot}}-S(p_d,T))")
-            st.markdown(f"- gelöst bei p_d: {dissolved_d:.2f} cm³N/L")
-            st.markdown(f"- frei am Austritt: {free_d:.2f} cm³N/L")
+            st.markdown(f"- gelöst@p_d={dissolved_d:.2f} cm³N/L, frei@p_d={free_d:.2f} cm³N/L")
 
             st.markdown("## 5) Gelöst-Anteile")
             st.latex(r"f_{\mathrm{sol}}(p)=\frac{\min(C_{\mathrm{tot}},S(p,T))}{C_{\mathrm{tot}}}")
-            st.markdown(f"- f_sol(p_s)={frac_diss_s*100:.2f}%")
-            st.markdown(f"- f_sol(p_d)={frac_diss_d*100:.2f}%")
+            st.markdown(f"- f_sol(p_s)={frac_diss_s*100:.2f}%, f_sol(p_d)={frac_diss_d*100:.2f}%")
 
-            st.markdown("## 6) Pumpenauswahl (konservativ über GVF_s + Sicherheit)")
+            st.markdown("## 6) Zielwert-Modus (wenn aktiv)")
+            st.latex(r"C_{\mathrm{tot}} = C_{\mathrm{target}} \le S(p_d,T)\quad (\text{frei}_d\approx 0)")
+            st.latex(r"C_{s,\mathrm{free}} = \max(0, C_{\mathrm{tot}} - S(p_s,T))")
+            st.markdown("- Aus C_free,s wird GVF_in rückwärts bestimmt (Umkehrung der Norm-Umrechnung).")
+
+            st.markdown("## 7) Pumpenauswahl (konservativ über GVF_s + Sicherheit)")
             st.latex(r"GVF_{s,\mathrm{safe}} = GVF_s\cdot \left(1+\frac{k}{100}\right)")
-            st.markdown(f"- GVF_s aus freiem Gas: {gvf_s_pct:.2f}%")
-            st.markdown(f"- Sicherheitsfaktor k={safety_factor}% → GVF_safe={gvf_s_pct_safe:.2f}%")
+            st.markdown(f"- GVF_s={gvf_s_pct:.2f}%, k={safety_factor}% → GVF_safe={gvf_s_pct_safe:.2f}%")
 
     except Exception as e:
         show_error(e, "Mehrphasenpumpen")
 
+
 def run_atex_selection():
     try:
-        st.header("ATEX-Motorauslegung (Erklärung)")
+        st.header("ATEX-Auslegung – Auswahl & Dokumentation")
 
-        st.markdown("""
-Diese Seite erklärt die ATEX-Grundlogik (vereinfachte Auslegung):
+        with st.sidebar:
+            st.subheader("Eingaben (ATEX)")
 
-- Auswahl der Zone (Gas: 0/1/2, Staub: 20/21/22)
-- Kategorie (z. B. II 3G) passend zur Zone
-- Temperaturklasse (T1…T6) und Sicherheitsabstand zur Medientemperatur
-- Leistungsauswahl inkl. Reserve
+            atmosphere = st.radio("Atmosphäre", ["Gas", "Staub"], index=0)
+            if atmosphere == "Gas":
+                zone = st.selectbox("Zone", [0, 1, 2], index=2)
+            else:
+                zone = st.selectbox("Zone", [20, 21, 22], index=2)
 
-Hinweis: Für eine echte Auslegung müssen Richtlinie 2014/34/EU und EN 60079 sowie Herstellerdaten geprüft werden.
-""")
+            P_req = st.number_input("Erforderliche Wellenleistung [kW]", min_value=0.1, value=5.5, step=0.5)
+            reserve = st.slider("Leistungsreserve [%]", 0, 30, 15)
 
-        with st.expander("Detaillierter Rechenweg (mit Formeln)"):
-            st.latex(r"P_{\mathrm{motor,min}} = 1.15\cdot P_{\mathrm{welle}}")
-            st.markdown("- IEC-Auswahl erfolgt auf die nächsthöhere Normmotorstufe.")
+            T_medium = st.number_input("Medientemperatur [°C]", min_value=-20.0, max_value=250.0, value=40.0, step=1.0)
+            t_margin = st.slider("Temperaturabstand [K]", 0, 30, 15)
+
+        if atmosphere == "Staub":
+            st.error("Staub-Ex ist in diesem Demo-Datensatz nicht hinterlegt. (Kann ich dir gern ergänzen.)")
+            return
+
+        if zone == 0:
+            st.warning("Zone 0 ist sehr anspruchsvoll (EPL Ga). In diesem Demo-Datensatz nicht abgebildet.")
+            return
+
+        # Mindestleistung + IEC
+        P_motor_min = P_req * (1.0 + reserve / 100.0)
+        P_iec = motor_iec(P_motor_min)
+
+        st.subheader("Ergebnisse")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Wellenleistung", f"{P_req:.2f} kW")
+        with c2:
+            st.metric(f"Mindestleistung (+{reserve}%)", f"{P_motor_min:.2f} kW")
+        with c3:
+            st.metric("IEC Motorgröße", f"{P_iec:.2f} kW")
+
+        # Filter auf passende Motoren
+        suitable = [
+            m for m in ATEX_MOTORS
+            if (zone in m["zone_suitable"]) and ((m["t_max_surface"] - t_margin) >= T_medium)
+        ]
+
+        if not suitable:
+            st.error(f"Kein Motor im Datensatz passt (Zone {zone}, T={T_medium:.1f}°C, Abstand {t_margin}K).")
+            st.info("Du kannst: Temperaturklasse anpassen, Motor-Datensätze ergänzen oder Sicherheitsabstand reduzieren.")
+            return
+
+        st.subheader("Verfügbare Motoren")
+        selected = st.radio(
+            "Motor auswählen:",
+            options=suitable,
+            format_func=lambda x: f"{x['marking']} — {x['id']}"
+        )
+
+        st.success("✅ Gültige Auswahl nach den gesetzten Filtern")
+
+        with st.expander("Rechenweg & Formeln"):
+            st.markdown("## 1) Leistungsreserve")
+            st.latex(r"P_{\mathrm{motor,min}} = P_{\mathrm{Welle}}\cdot\left(1+\frac{r}{100}\right)")
+            st.markdown(f"- r={reserve}% → P_motor,min={P_motor_min:.2f} kW")
+            st.markdown("## 2) IEC Stufe")
+            st.markdown("- Es wird die nächsthöhere IEC-Nennleistung gewählt.")
+            st.markdown(f"- IEC={P_iec:.2f} kW")
+            st.markdown("## 3) Temperaturprüfung")
+            st.latex(r"T_{\mathrm{surface,max}} - \Delta T \ge T_{\mathrm{medium}}")
+            st.markdown(f"- T_surface,max={selected['t_max_surface']:.1f}°C, ΔT={t_margin}K, T_medium={T_medium:.1f}°C")
+
+        # Export (wie zuvor)
+        if st.button("ATEX-Dokumentation exportieren"):
+            html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>ATEX-Auslegung - {selected['id']}</title>
+  <style>
+    body {{ font-family: Arial; max-width: 900px; margin: 0 auto; padding: 20px; }}
+    h1 {{ color: #2c3e50; }}
+    .box {{ margin: 10px 0; padding: 12px; background: #f8f9fa; border-radius: 8px; }}
+    table {{ border-collapse: collapse; width: 100%; margin: 14px 0; }}
+    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+    th {{ background-color: #f2f2f2; }}
+    code {{ background:#eee; padding:2px 4px; border-radius:4px; }}
+  </style>
+</head>
+<body>
+  <h1>ATEX-Motorauslegung</h1>
+  <p>Erstellt am: {datetime.now().strftime('%d.%m.%Y %H:%M')}</p>
+
+  <div class="box">
+    <strong>Atmosphäre:</strong> {atmosphere}<br/>
+    <strong>Zone:</strong> {zone}<br/>
+    <strong>Wellenleistung:</strong> {P_req:.2f} kW<br/>
+    <strong>Reserve:</strong> {reserve}%<br/>
+    <strong>Medientemperatur:</strong> {T_medium:.1f} °C<br/>
+    <strong>Temperaturabstand:</strong> {t_margin} K
+  </div>
+
+  <h2>Berechnung</h2>
+  <table>
+    <tr><th>Parameter</th><th>Wert</th></tr>
+    <tr><td>Mindestleistung</td><td>{P_motor_min:.2f} kW</td></tr>
+    <tr><td>IEC Nennleistung</td><td>{P_iec:.2f} kW</td></tr>
+    <tr><td>Prüfung Oberfläche</td><td>{selected['t_max_surface']:.1f}°C - {t_margin}K ≥ {T_medium:.1f}°C</td></tr>
+  </table>
+
+  <h2>Ausgewählter Motor</h2>
+  <div class="box">
+    <strong>ID:</strong> {selected['id']}<br/>
+    <strong>Kennzeichnung:</strong> <code>{selected['marking']}</code><br/>
+    <strong>Kategorie:</strong> {selected['category']}<br/>
+    <strong>Temp.-Klasse:</strong> {selected['temp_class']}<br/>
+    <strong>Gasgruppe:</strong> {selected.get('gas_group','-')}<br/>
+    <strong>Schutzart:</strong> {selected.get('protection','-')}<br/>
+    <strong>Wirkungsgrad:</strong> {selected.get('efficiency_class','-')}<br/>
+    <strong>Geeignet für Zone:</strong> {", ".join(map(str, selected["zone_suitable"]))}<br/>
+  </div>
+
+  <h2>Hinweis</h2>
+  <p>Bitte Konformität mit 2014/34/EU und EN 60079 sowie Herstellerdaten (EPL, Zündschutzart, T-Klasse, Kennwerte) prüfen.</p>
+</body>
+</html>
+"""
+            st.download_button(
+                "HTML-Dokumentation herunterladen",
+                data=html,
+                file_name=f"ATEX_Auslegung_{datetime.now().strftime('%Y%m%d')}.html",
+                mime="text/html"
+            )
 
     except Exception as e:
         show_error(e, "ATEX")
+
 
 def main():
     try:
