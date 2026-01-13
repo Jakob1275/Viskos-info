@@ -507,7 +507,7 @@ def run_single_phase_pump():
             with colC:
                 st.subheader("Optionen")
                 allow_out = st.checkbox("Auswahl außerhalb Kennlinie zulassen", value=True)
-                reserve_pct = st.slider("Motorreserve [%]", 0, 30, 15)
+                reserve_pct = st.slider("Motorreserve [%]", 0, 30, 10)
                 n_min = st.slider("n_min/n0", 0.4, 1.0, 0.6, 0.01)
                 n_max = st.slider("n_max/n0", 1.0, 1.6, 1.2, 0.01)
 
