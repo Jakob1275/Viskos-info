@@ -658,13 +658,32 @@ def run_single_phase_pump():
         n_opt_rpm = None
         P_opt_kW = None
         saving_pct = None
+        P_throttle_kW = None  # Baseline ohne VFD (n0 + "Drossel"/Verlust)
+
+        # Baseline ohne VFD: Pumpe bei n0 liefert bei Q_vis_req eine bestimmte Förderhöhe H_pump_n0
+        # (wenn H_pump_n0 > H_vis_req, wird die "zu viel" Förderhöhe als Verlust vernichtet,
+        # die Pumpe muss sie aber trotzdem aufbauen -> Leistung basiert auf H_pump_n0)
+        H_pump_n0 = safe_interp(Q_vis_req, pump["Qw"], pump["Hw"])
+        eta_pump_n0 = safe_interp(Q_vis_req, pump["Qw"], pump["eta"])
+
+        # Viskositätswirkung auf η (bei Wasser ist Ceta=1 durch Wasser-Guard)
+        eta_pump_n0_vis = safe_clamp(float(eta_pump_n0) * float(Ceta), 0.05, 0.95)
+
+        P_hyd_throttle_W = rho * G * (Q_vis_req / 3600.0) * float(H_pump_n0)
+        P_throttle_kW = (P_hyd_throttle_W / max(eta_pump_n0_vis, 1e-9)) / 1000.0
+
+        # VFD-Fall: gleiche Anforderung Q_vis_req & H_vis_req, η am "Basis"-Punkt (Q_base) aus viskoser Kurve
         if n_ratio_opt is not None:
             n_opt_rpm = N0_RPM_DEFAULT * n_ratio_opt
+
             Q_base = Q_vis_req / n_ratio_opt
-            P_base = safe_interp(Q_base, Q_vis_curve, P_vis_curve)
-            P_opt_kW = float(P_base) * (n_ratio_opt ** 3)
-            P_nom_at_Q = safe_interp(Q_vis_req, Q_vis_curve, P_vis_curve)
-            saving_pct = ((P_nom_at_Q - P_opt_kW) / P_nom_at_Q * 100.0) if P_nom_at_Q > 0 else 0.0
+            eta_base = safe_interp(Q_base, Q_vis_curve, eta_vis_curve)
+            eta_vfd = safe_clamp(float(eta_base), 0.05, 0.95)
+
+            P_hyd_vfd_W = rho * G * (Q_vis_req / 3600.0) * float(H_vis_req)
+            P_opt_kW = (P_hyd_vfd_W / max(eta_vfd, 1e-9)) / 1000.0
+
+            saving_pct = ((P_throttle_kW - P_opt_kW) / P_throttle_kW * 100.0) if P_throttle_kW > 0 else 0.0
 
         st.subheader("Ergebnisse")
         c1, c2, c3, c4, c5 = st.columns(5)
@@ -689,6 +708,8 @@ def run_single_phase_pump():
 
         if not best["in_range"]:
             st.warning(f"Betriebspunkt außerhalb Wasserkennlinie! Bewertung bei Q={best['Q_eval']:.1f} m³/h")
+            
+        st.metric("Leistung n0 (bei Q, H_n0)", f"{P_throttle_kW:.2f} kW")
 
         st.subheader("Kennlinien")
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
