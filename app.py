@@ -738,13 +738,12 @@ def run_single_phase_pump():
 
         # --- Q-H ---
         ax1.plot(pump["Qw"], pump["Hw"], "o-", label="Wasser (n0)")
-        ax1.plot(Q_vis_curve, H_vis_curve, "s--", label="Viskos (n0)")
         if n_ratio_opt is not None:
-            Q_scaled = [q * n_ratio_opt for q in Q_vis_curve]
-            H_scaled = [h * (n_ratio_opt ** 2) for h in H_vis_curve]
-            ax1.plot(Q_scaled, H_scaled, ":", label=f"Viskos (n≈{n_opt_rpm:.0f} rpm)")
-        ax1.scatter([Q_water], [best["H_at"]], marker="^", s=90, label="BP (Wasser-Äquiv.)")
+            Q_scaled = [q * n_ratio_opt for q in pump["Qw"]]
+            H_scaled = [h * (n_ratio_opt ** 2) for h in pump["Hw"]]
+            ax1.plot(Q_scaled, H_scaled, ":", label=f"Wasser (n≈{n_opt_rpm:.0f} rpm)")
         ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=90, label="BP (viskos)")
+        ax1.scatter([Q_water], [best["H_at"]], marker="^", s=90, label="BP (Wasser-Äquiv.)")
         ax1.set_xlabel("Q [m³/h]")
         ax1.set_ylabel("H [m]")
         ax1.set_title("Q-H")
