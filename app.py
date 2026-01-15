@@ -133,6 +133,38 @@ ATEX_MOTORS = [
 ]
 
 # =========================
+# NPSH / Kavitation
+# =========================
+def compute_npsh_available(p_suction_bar_abs, p_vapor_bar, z_suction_m, rho_kg_m3):
+    """
+    NPSH_a = (p_suction - p_vapor) / (rho * g) + z_suction
+    p_suction_bar_abs: Absolutdruck an Saugseite [bar]
+    p_vapor_bar: Dampfdruck des Mediums [bar]
+    z_suction_m: Geodätische Saughöhe (positiv wenn über Pumpe) [m]
+    rho_kg_m3: Dichte des Mediums [kg/m³]
+    """
+    p_suction = float(p_suction_bar_abs)
+    p_v = float(p_vapor_bar)
+    rho = float(rho_kg_m3)
+    z = float(z_suction_m)
+    
+    # Umrechnung bar -> m Flüssigkeitssäule
+    dp_bar = p_suction - p_v
+    h_m = (dp_bar * BAR_TO_PA) / (rho * G)
+    
+    npsh_a = h_m + z
+    return npsh_a
+
+def check_cavitation(npsh_a, npsh_r, safety_margin_m=0.5):
+    """
+    Prüft ob NPSH_available > NPSH_required + Sicherheitsabstand
+    Gibt (is_safe, margin) zurück
+    """
+    margin = float(npsh_a) - float(npsh_r)
+    is_safe = margin >= float(safety_margin_m)
+    return is_safe, margin
+
+# =========================
 # Utilities
 # =========================
 def safe_clamp(x, a, b):
@@ -203,6 +235,9 @@ def viscosity_correction_factors(B):
 
 def viscous_to_water_point(Q_vis_m3h, H_vis_m, nu_cSt):
     """
+    Rückrechnung von viskosem Betriebspunkt auf äquivalenten Wasser-Betriebspunkt.
+    H_vis = H_water / CH  =>  H_water = H_vis * CH
+    Bei höherer Viskosität ist H_vis < H_water, daher ist CH < 1.
     Wichtig: Bei "Wasser" darf KEINE HI-Korrektur aktiv werden, sonst bekommst du
     unterschiedliche Q-P/Q-H-Kurven für Wasser vs. viskos.
     """
@@ -214,27 +249,27 @@ def viscous_to_water_point(Q_vis_m3h, H_vis_m, nu_cSt):
         CH, Ceta = viscosity_correction_factors(B)
 
     Q_water = float(Q_vis_m3h)  # CQ ~ 1 (stabil)
-    H_water = float(H_vis_m) / max(CH, 1e-9)
+    # KORREKTUR: H_water = H_vis * CH (nicht Division!), da H_vis = H_water / CH
+    H_water = float(H_vis_m) * max(CH, 1e-9)
     return {"Q_water": Q_water, "H_water": H_water, "B": B, "CH": CH, "Ceta": Ceta}
 
-def generate_viscous_curve(pump, nu_cSt, rho):
+def generate_viscous_curve(pump, nu_cSt, rho, use_consistent_power=True):
     """
-    Option A (Praxis):
-    - Wasser-Leistungskurve basiert auf Pw-Datensatz (realistisch inkl. Verluste).
-    - Viskose Leistung wird als Skalierung von Pw abgeleitet (damit Offsets/Verluste erhalten bleiben).
-    - H_vis und eta_vis werden wie bisher über (CH, Ceta) korrigiert.
+    Generiert viskose Kennlinien aus Wasserkennlinien.
+    
+    Option A (use_consistent_power=True, empfohlen):
+    - Konsistente Berechnung: P wird direkt aus H_vis und η_vis berechnet
+    - P_vis = (ρ g Q H_vis) / η_vis
+    
+    Option B (use_consistent_power=False, legacy):
+    - Wasser-Leistungskurve basiert auf Pw-Datensatz (realistisch inkl. Verluste)
+    - Viskose Leistung wird als Skalierung von Pw abgeleitet (damit Offsets/Verluste erhalten bleiben)
+    - H_vis und eta_vis werden wie bisher über (CH, Ceta) korrigiert
     """
     Qw = np.array(pump["Qw"], dtype=float)
     Hw = np.array(pump["Hw"], dtype=float)
     etaw = np.array(pump["eta"], dtype=float)
     Pw_ref = np.array(pump["Pw"], dtype=float)  # kW, Referenz (Wasser)
-
-    # Theoretische Wasserleistung aus H&η nur für Skalierungsfaktor (nicht als Anzeige-Referenz)
-    P_water_theory = []
-    for q, h, e in zip(Qw, Hw, etaw):
-        P_hyd_W = rho * G * (q / 3600.0) * h
-        P_water_theory.append((P_hyd_W / max(e, 1e-9)) / 1000.0)
-    P_water_theory = np.array(P_water_theory, dtype=float)
 
     H_vis, eta_vis, P_vis = [], [], []
 
@@ -243,22 +278,32 @@ def generate_viscous_curve(pump, nu_cSt, rho):
         B = compute_B_HI(q if q > 0 else 1e-6, max(h, 1e-6), nu_cSt)
         CH, Ceta = viscosity_correction_factors(B)
 
-        hv = float(h) * float(CH)
+        # KORREKTUR: Bei höherer Viskosität SINKT die Förderhöhe -> Division durch CH!
+        hv = float(h) / max(float(CH), 1e-9)
         ev = safe_clamp(float(e) * float(Ceta), 0.05, 0.95)
 
-        # theoretische viskose Leistung (nur für Skalierungsfaktor)
-        P_hyd_vis_W = rho * G * (float(q) / 3600.0) * hv
-        P_vis_theory = (P_hyd_vis_W / max(ev, 1e-9)) / 1000.0
-
-        # Skalierung der realistischen Wasser-Pw auf "viskos"
-        # -> bewahrt Verluste/Offsets aus Pw (z.B. bei Q=0)
-        if P_water_theory[i] > 1e-6:
-            scale = float(P_vis_theory) / float(P_water_theory[i])
+        if use_consistent_power:
+            # Konsistente Berechnung: P_vis direkt aus H_vis und η_vis
+            P_hyd_vis_W = rho * G * (float(q) / 3600.0) * hv
+            pv = (P_hyd_vis_W / max(ev, 1e-9)) / 1000.0
         else:
-            # Bei Q≈0 ist Theorie unbrauchbar -> konservativ nur über Effizienzfaktor skalieren
-            scale = 1.0 / max(float(Ceta), 1e-9)
+            # Legacy: Skalierung von Pw_ref (bewahrt Verluste/Offsets)
+            # Theoretische Wasserleistung aus H&η nur für Skalierungsfaktor
+            P_hyd_water_W = rho * G * (float(q) / 3600.0) * float(h)
+            P_water_theory = (P_hyd_water_W / max(float(e), 1e-9)) / 1000.0
+            
+            # theoretische viskose Leistung (nur für Skalierungsfaktor)
+            P_hyd_vis_W = rho * G * (float(q) / 3600.0) * hv
+            P_vis_theory = (P_hyd_vis_W / max(ev, 1e-9)) / 1000.0
 
-        pv = float(Pw_ref[i]) * float(scale)
+            # Skalierung der realistischen Wasser-Pw auf "viskos"
+            if P_water_theory > 1e-6:
+                scale = float(P_vis_theory) / float(P_water_theory)
+            else:
+                # Bei Q≈0 ist Theorie unbrauchbar -> konservativ nur über Effizienzfaktor skalieren
+                scale = 1.0 / max(float(Ceta), 1e-9)
+
+            pv = float(Pw_ref[i]) * float(scale)
 
         H_vis.append(hv)
         eta_vis.append(ev)
@@ -649,12 +694,25 @@ def run_single_phase_pump():
                 medium = st.selectbox("Medium", list(MEDIA.keys()), index=0)
                 rho = st.number_input("Dichte ρ [kg/m³]", min_value=1.0, value=float(MEDIA[medium]["rho"]), step=5.0)
                 nu = st.number_input("Kinematische Viskosität ν [cSt]", min_value=0.1, value=float(MEDIA[medium]["nu"]), step=0.5)
+                p_vapor = st.number_input("Dampfdruck p_vapor [bar]", min_value=0.0, value=float(MEDIA[medium]["p_vapor"]), step=0.01, format="%.4f")
             with colC:
                 st.subheader("Optionen")
                 allow_out = st.checkbox("Auswahl außerhalb Kennlinie zulassen", value=True)
                 reserve_pct = st.slider("Motorreserve [%]", 0, 30, 10)
                 n_min = st.slider("n_min/n0", 0.4, 1.0, 0.6, 0.01)
                 n_max = st.slider("n_max/n0", 1.0, 1.6, 1.2, 0.01)
+                use_consistent_power = st.checkbox("Konsistente Leistungsberechnung (P aus H & η)", value=True,
+                                                   help="Empfohlen: Berechnet P direkt aus H und η statt Skalierung von Pw")
+        
+        with st.expander("NPSH / Kavitationsprüfung", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                p_suction_bar = st.number_input("Saugdruck p_s [bar abs]", min_value=0.1, value=1.013, step=0.1)
+                z_suction_m = st.number_input("Geodätische Saughöhe z_s [m]", min_value=-10.0, value=0.0, step=0.5,
+                                             help="Positiv wenn Flüssigkeitsspiegel über Pumpe, negativ wenn darunter")
+            with col2:
+                npsh_margin = st.number_input("NPSH-Sicherheitsabstand [m]", min_value=0.0, value=0.5, step=0.1)
+                check_npsh = st.checkbox("Kavitationsprüfung durchführen", value=True)
 
         conv = viscous_to_water_point(Q_vis_req, H_vis_req, nu)
         Q_water = conv["Q_water"]
@@ -674,7 +732,7 @@ def run_single_phase_pump():
         P_vis_kW = (P_hyd_W / max(eta_vis, 1e-9)) / 1000.0
         P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
 
-        Q_vis_curve, H_vis_curve, eta_vis_curve, P_vis_curve = generate_viscous_curve(pump, nu, rho)
+        Q_vis_curve, H_vis_curve, eta_vis_curve, P_vis_curve = generate_viscous_curve(pump, nu, rho, use_consistent_power)
         n_ratio_opt = find_speed_ratio(Q_vis_curve, H_vis_curve, Q_vis_req, H_vis_req, n_min, n_max)
 
         n_opt_rpm = None
@@ -732,6 +790,27 @@ def run_single_phase_pump():
             st.warning(f"Betriebspunkt außerhalb Wasserkennlinie! Bewertung bei Q={best['Q_eval']:.1f} m³/h")
             
         st.metric("Leistung n0 (bei Q, H_n0)", f"{P_throttle_kW:.2f} kW")
+        
+        # NPSH-Prüfung
+        if check_npsh:
+            npsh_r = safe_interp(Q_vis_req, pump["Qw"], pump["NPSHr"])
+            npsh_a = compute_npsh_available(p_suction_bar, p_vapor, z_suction_m, rho)
+            is_safe, margin = check_cavitation(npsh_a, npsh_r, npsh_margin)
+            
+            st.subheader("⚠️ Kavitationsprüfung (NPSH)")
+            col_npsh1, col_npsh2, col_npsh3 = st.columns(3)
+            with col_npsh1:
+                st.metric("NPSH required", f"{npsh_r:.2f} m")
+            with col_npsh2:
+                st.metric("NPSH available", f"{npsh_a:.2f} m")
+            with col_npsh3:
+                st.metric("Sicherheitsabstand", f"{margin:.2f} m")
+            
+            if not is_safe:
+                st.error(f"🚨 KAVITATIONSGEFAHR! NPSH_a ({npsh_a:.2f} m) < NPSH_r ({npsh_r:.2f} m) + Sicherheit ({npsh_margin:.2f} m)")
+                st.warning("⚠️ Maßnahmen: Saugdruck erhöhen, Saughöhe reduzieren, Temperatur senken, oder Pumpe mit niedrigerem NPSH_r wählen!")
+            else:
+                st.success(f"✅ Keine Kavitationsgefahr (Sicherheitsabstand: {margin:.2f} m)")
 
         st.subheader("Kennlinien")
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
@@ -783,6 +862,13 @@ def run_single_phase_pump():
         st.pyplot(fig)
 
         with st.expander("Detaillierter Rechenweg (Einphase)"):
+            st.markdown("### ⚠️ Wichtige Korrekturen in dieser Version:")
+            st.info("✅ Viskositätskorrektur-Richtung korrigiert: H_vis = H_water / CH (bei höherer Viskosität SINKT die Förderhöhe)")
+            st.info("✅ Kavitationsprüfung (NPSH) hinzugefügt: NPSH_a muss größer sein als NPSH_r + Sicherheitsabstand")
+            st.info("✅ Konsistente Leistungsberechnung: P wird direkt aus H und η berechnet (Option wählbar)")
+            
+            st.markdown("---")
+            st.markdown("### 1) Hydraulic Institute (HI) Viskositätskorrektur")
             st.latex(r"B = 16.5 \cdot \frac{\sqrt{\nu}}{Q^{0.25}\cdot H^{0.375}} \quad (\nu \text{ in cSt, } Q \text{ in gpm, } H \text{ in ft})")
             st.markdown(f"- Umrechnung: \(Q_{{gpm}} = Q_{{m^3/h}}\cdot 4.40287\), \(H_{{ft}} = H_{{m}}\cdot 3.28084\)")
             st.markdown(f"- Eingabe: \(Q_{{vis}}={Q_vis_req:.2f}\), \(H_{{vis}}={H_vis_req:.2f}\), \\(\\nu={nu:.2f}\\) cSt → **B={B:.3f}**")
@@ -792,17 +878,38 @@ def run_single_phase_pump():
             st.latex(r"C_H=\exp\left(-0.165\cdot (\log_{10}(B))^{2.2}\right)")
             st.latex(r"C_\eta = 1 - 0.25\log_{10}(B) - 0.05(\log_{10}(B))^2")
             st.markdown(f"- **C_H={CH:.3f}**, **C_η={Ceta:.3f}**")
-            st.latex(r"Q_w \approx Q_{vis}\quad;\quad H_w = \frac{H_{vis}}{C_H}")
+            st.markdown(f"- **Wichtig**: CH < 1 bedeutet, dass bei höherer Viskosität die Förderhöhe SINKT!")
+            
+            st.markdown("### 2) Rückrechnung auf Wasser-Äquivalent")
+            st.latex(r"H_{vis} = \frac{H_{water}}{C_H} \quad \Rightarrow \quad H_{water} = H_{vis} \cdot C_H")
+            st.latex(r"Q_w \approx Q_{vis} \quad(\text{CQ} \approx 1)")
             st.markdown(f"- Ergebnis: **Q_w={Q_water:.2f} m³/h**, **H_w={H_water:.2f} m**")
+            
+            st.markdown("### 3) Leistungsberechnung")
             st.latex(r"P_{hyd}=\rho g Q H \quad,\quad P_{Welle}=\frac{P_{hyd}}{\eta}")
             st.markdown(f"- \(P_{{hyd}}={P_hyd_W:.0f}\,W\), \(\\eta_{{vis}}={eta_vis:.3f}\) → **P_welle={P_vis_kW:.2f} kW**")
             st.markdown(f"- Motorreserve {reserve_pct}% → **IEC={P_motor_kW:.2f} kW**")
+            
+            st.markdown("### 4) Drehzahlvariation (Affinitätsgesetze)")
             st.latex(r"H(Q,n)=H(Q/n,n_0)\cdot (n/n_0)^2 \quad;\quad P(n)=P(n_0)\cdot (n/n_0)^3")
             if n_ratio_opt is not None and P_opt_kW is not None:
                 st.markdown(f"- Drehzahlfaktor: **n/n0={n_ratio_opt:.3f}** → **n={n_opt_rpm:.0f} rpm**")
                 st.markdown(f"- **P_opt={P_opt_kW:.2f} kW**, Einsparung **{saving_pct:.1f}%**")
             else:
                 st.markdown("- Keine gültige optimale Drehzahl im Bereich gefunden.")
+            
+            st.markdown("### 5) Kavitationsprüfung (NPSH)")
+            if check_npsh:
+                st.latex(r"NPSH_a = \frac{p_{suction} - p_{vapor}}{\rho g} + z_{suction}")
+                st.markdown(f"- NPSH_r = {npsh_r:.2f} m (aus Kennlinie bei Q={Q_vis_req:.1f} m³/h)")
+                st.markdown(f"- NPSH_a = {npsh_a:.2f} m (berechnet aus p_s={p_suction_bar:.2f} bar, p_v={p_vapor:.4f} bar, z={z_suction_m:.1f} m)")
+                st.latex(r"\text{Sicherheit: } NPSH_a \geq NPSH_r + \Delta_{Sicherheit}")
+                if is_safe:
+                    st.success(f"✅ OK: {npsh_a:.2f} ≥ {npsh_r:.2f} + {npsh_margin:.2f} (Abstand: {margin:.2f} m)")
+                else:
+                    st.error(f"❌ KAVITATIONSGEFAHR: {npsh_a:.2f} < {npsh_r:.2f} + {npsh_margin:.2f}")
+            else:
+                st.markdown("- Kavitationsprüfung nicht aktiviert.")
 
     except Exception as e:
         show_error(e, "Einphasenpumpen")
