@@ -276,7 +276,10 @@ def generate_viscous_curve(pump, nu_cSt, rho, use_consistent_power=True):
     for i, (q, h, e) in enumerate(zip(Qw, Hw, etaw)):
         # HI-Korrektur (bei Wasser -> CH=Ceta=1, wenn du Water-Guard nutzt)
         B = compute_B_HI(q if q > 0 else 1e-6, max(h, 1e-6), nu_cSt)
-        CH, Ceta = viscosity_correction_factors(B)
+        if is_effectively_water(nu_cSt):
+            CH, Ceta = 1.0, 1.0
+        else:
+            CH, Ceta = viscosity_correction_factors(B)
 
         # KORREKTUR: Bei höherer Viskosität SINKT die Förderhöhe -> Division durch CH!
         hv = float(h) / max(float(CH), 1e-9)
@@ -534,6 +537,12 @@ def _interp_between_gvf_keys(pump, gvf_pct):
         return lo, hi, 0.0
     w = (gvf_pct - lo) / (hi - lo)
     return lo, hi, w
+
+def nearest_gvf_key(pump, gvf_pct):
+    keys = sorted(pump["curves_dp_vs_Q"].keys())
+    if not keys:
+        return gvf_pct
+    return min(keys, key=lambda k: abs(k - gvf_pct))
 
 def _dp_at_Q_gvf(pump, Q_m3h, gvf_pct):
     lo, hi, w = _interp_between_gvf_keys(pump, gvf_pct)
@@ -964,6 +973,11 @@ def run_multi_phase_pump():
                     value=False,
                     help="Wenn aktiv: C_ziel [Ncm³/L] wird direkt auf GVF-Kennlinie gemappt (100 Ncm³/L → 10%)."
                 )
+                use_interpolated_gvf = st.checkbox(
+                    "GVF interpolieren (zwischen Kennlinien)",
+                    value=True,
+                    help="Wenn aktiv: GVF darf zwischen den Kurven liegen (z.B. 12,3%)."
+                )
                 show_temp_band = st.checkbox("Temperaturband im Löslichkeitsdiagramm", value=True)
                 show_ref_targets = st.checkbox("Referenzlinien (50/100/150 Ncm³/L)", value=True)
 
@@ -1012,6 +1026,10 @@ def run_multi_phase_pump():
         else:
             gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(free_s, p_suction, temperature, gvf_ref_gas)
         gvf_s_pct_safe = gvf_s_pct * (1.0 + safety_factor / 100.0)
+        if use_interpolated_gvf:
+            gvf_curve_pct = gvf_s_pct_safe
+        else:
+            gvf_curve_pct = nearest_gvf_key(MPH_PUMPS[0], gvf_s_pct_safe) if MPH_PUMPS else gvf_s_pct_safe
 
         frac_diss_s = (dissolved_s / C_ziel * 100.0) if C_ziel > 0 else 0.0
         frac_free_s = (free_s / C_ziel * 100.0) if C_ziel > 0 else 0.0
@@ -1022,7 +1040,7 @@ def run_multi_phase_pump():
             best_pump = choose_best_mph_pump_autoQ(
                 MPH_PUMPS,
                 dp_req_bar=dp_req,
-                gvf_free_pct=gvf_s_pct_safe,
+                gvf_free_pct=gvf_curve_pct,
                 nu_cSt=nu_liq,
                 rho_liq=rho_liq
             )
@@ -1042,6 +1060,8 @@ def run_multi_phase_pump():
         with r3:
             st.metric("GVF_s (frei)", f"{gvf_s_pct:.2f}%")
             st.metric("GVF_s (+Sicherheit)", f"{gvf_s_pct_safe:.2f}%")
+            gvf_label = f"{gvf_curve_pct:.1f}%" if use_interpolated_gvf else f"{gvf_curve_pct:.0f}%"
+            st.metric("GVF-Kennlinie", gvf_label)
         with r4:
             if p_req is None:
                 st.warning("p_req nicht erreichbar (0.2…200 bar) – Ziel zu hoch im Modell.")
@@ -1051,8 +1071,10 @@ def run_multi_phase_pump():
 
         if best_pump and dp_req is not None:
             gvf_src = "aus C_ziel" if use_cziel_as_gvf else "physikalisch"
+            gvf_display = f"{gvf_curve_pct:.1f}%" if use_interpolated_gvf else f"{gvf_curve_pct:.0f}%"
+            gvf_mode = "interpoliert" if use_interpolated_gvf else "diskret"
             st.success(
-                f"✅ Empfohlene Pumpe: {best_pump['pump']['id']}  |  GVF≈{best_pump['gvf_key']:.1f}% (interpoliert, {gvf_src})"
+                f"✅ Empfohlene Pumpe: {best_pump['pump']['id']}  |  GVF-Kennlinie {gvf_display} ({gvf_mode}, {gvf_src})"
             )
             p1, p2, p3, p4 = st.columns(4)
             with p1:
@@ -1137,7 +1159,7 @@ def run_multi_phase_pump():
             Q_sel = float(best_pump["Q_m3h"])
             Q_lmin_sel = m3h_to_lmin(Q_sel)
             H_req_plot = dp_req * BAR_TO_M_LIQ
-            gvf_sel = float(best_pump["gvf_key"])
+            gvf_sel = float(gvf_curve_pct)
 
             max_Q_lmin = 0.0
             max_H = 0.0
@@ -1150,20 +1172,34 @@ def run_multi_phase_pump():
                 max_H = max(max_H, max(H_m))
                 ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"{gvf_key}% GVF")
 
-            # Interpolierte GVF-Kurve für den ausgewählten GVF-Wert (z.B. 12%)
-            base_keys = sorted(pump["curves_dp_vs_Q"].keys())
-            base_curve = pump["curves_dp_vs_Q"][base_keys[0]]
-            Q_interp = list(map(float, base_curve["Q"]))
-            H_interp = [
-                _dp_at_Q_gvf(pump, q, gvf_sel)[0] * BAR_TO_M_LIQ for q in Q_interp
-            ]
-            ax2.plot(
-                [m3h_to_lmin(q) for q in Q_interp],
-                H_interp,
-                "-",
-                linewidth=2.5,
-                label=f"GVF≈{gvf_sel:.1f}% (interpoliert)"
-            )
+            if use_interpolated_gvf:
+                # Interpolierte GVF-Kurve (BP liegt exakt darauf)
+                base_keys = sorted(pump["curves_dp_vs_Q"].keys())
+                base_curve = pump["curves_dp_vs_Q"][base_keys[0]]
+                Q_interp = list(map(float, base_curve["Q"]))
+                H_interp = [
+                    _dp_at_Q_gvf(pump, q, gvf_sel)[0] * BAR_TO_M_LIQ for q in Q_interp
+                ]
+                ax2.plot(
+                    [m3h_to_lmin(q) for q in Q_interp],
+                    H_interp,
+                    "-",
+                    linewidth=2.5,
+                    label=f"GVF≈{gvf_sel:.1f}% (interpoliert)"
+                )
+            else:
+                # Ausgewählte diskrete GVF-Kurve (BP liegt exakt darauf)
+                sel_curve = pump["curves_dp_vs_Q"].get(gvf_sel)
+                if sel_curve:
+                    Q_sel_curve = [m3h_to_lmin(q) for q in sel_curve["Q"]]
+                    H_sel_curve = [dp * BAR_TO_M_LIQ for dp in sel_curve["dp"]]
+                    ax2.plot(
+                        Q_sel_curve,
+                        H_sel_curve,
+                        "-",
+                        linewidth=2.5,
+                        label=f"GVF {gvf_sel:.0f}% (ausgewählt)"
+                    )
 
             ax2.scatter(Q_lmin_sel, H_req_plot, s=110, marker="x", label="Betriebspunkt (auto Q)")
             ax2.set_xlabel("Volumenstrom [L/min]")
