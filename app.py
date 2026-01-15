@@ -218,31 +218,53 @@ def viscous_to_water_point(Q_vis_m3h, H_vis_m, nu_cSt):
     return {"Q_water": Q_water, "H_water": H_water, "B": B, "CH": CH, "Ceta": Ceta}
 
 def generate_viscous_curve(pump, nu_cSt, rho):
+    """
+    Option A (Praxis):
+    - Wasser-Leistungskurve basiert auf Pw-Datensatz (realistisch inkl. Verluste).
+    - Viskose Leistung wird als Skalierung von Pw abgeleitet (damit Offsets/Verluste erhalten bleiben).
+    - H_vis und eta_vis werden wie bisher über (CH, Ceta) korrigiert.
+    """
     Qw = np.array(pump["Qw"], dtype=float)
     Hw = np.array(pump["Hw"], dtype=float)
     etaw = np.array(pump["eta"], dtype=float)
+    Pw_ref = np.array(pump["Pw"], dtype=float)  # kW, Referenz (Wasser)
+
+    # Theoretische Wasserleistung aus H&η nur für Skalierungsfaktor (nicht als Anzeige-Referenz)
+    P_water_theory = []
+    for q, h, e in zip(Qw, Hw, etaw):
+        P_hyd_W = rho * G * (q / 3600.0) * h
+        P_water_theory.append((P_hyd_W / max(e, 1e-9)) / 1000.0)
+    P_water_theory = np.array(P_water_theory, dtype=float)
 
     H_vis, eta_vis, P_vis = [], [], []
-    for q, h, e in zip(Qw, Hw, etaw):
+
+    for i, (q, h, e) in enumerate(zip(Qw, Hw, etaw)):
+        # HI-Korrektur (bei Wasser -> CH=Ceta=1, wenn du Water-Guard nutzt)
         B = compute_B_HI(q if q > 0 else 1e-6, max(h, 1e-6), nu_cSt)
+        CH, Ceta = viscosity_correction_factors(B)
 
-        # Wasser-Guard
-        if is_effectively_water(nu_cSt):
-            CH, Ceta = 1.0, 1.0
+        hv = float(h) * float(CH)
+        ev = safe_clamp(float(e) * float(Ceta), 0.05, 0.95)
+
+        # theoretische viskose Leistung (nur für Skalierungsfaktor)
+        P_hyd_vis_W = rho * G * (float(q) / 3600.0) * hv
+        P_vis_theory = (P_hyd_vis_W / max(ev, 1e-9)) / 1000.0
+
+        # Skalierung der realistischen Wasser-Pw auf "viskos"
+        # -> bewahrt Verluste/Offsets aus Pw (z.B. bei Q=0)
+        if P_water_theory[i] > 1e-6:
+            scale = float(P_vis_theory) / float(P_water_theory[i])
         else:
-            CH, Ceta = viscosity_correction_factors(B)
+            # Bei Q≈0 ist Theorie unbrauchbar -> konservativ nur über Effizienzfaktor skalieren
+            scale = 1.0 / max(float(Ceta), 1e-9)
 
-        hv = h * CH
-        ev = safe_clamp(e * Ceta, 0.05, 0.95)
-
-        P_hyd_W = rho * G * (q / 3600.0) * hv
-        pv = (P_hyd_W / max(ev, 1e-9)) / 1000.0
+        pv = float(Pw_ref[i]) * float(scale)
 
         H_vis.append(hv)
         eta_vis.append(ev)
         P_vis.append(pv)
 
-    return Qw.tolist(), np.array(H_vis).tolist(), np.array(eta_vis).tolist(), np.array(P_vis).tolist()
+    return Qw.tolist(), H_vis, eta_vis, P_vis
 
 def water_power_curve_from_H_eta(pump, rho):
     """
@@ -740,20 +762,20 @@ def run_single_phase_pump():
         ax2.legend()
 
         # --- Q-P (konsistent!) ---
-        QwP, Pw_calc = water_power_curve_from_H_eta(pump, rho)
-        ax3.plot(QwP, Pw_calc, "o-", label="Wasser (aus H & η berechnet)")
-        # optional: original Datensatz als Vergleich (kann abweichen)
-        ax3.plot(pump["Qw"], pump["Pw"], "o:", alpha=0.6, label="Wasser (Pw Datensatz)")
+        ax3.plot(pump["Qw"], pump["Pw"], "o-", label="Wasser (Pw Referenz)")
+        ax3.plot(Q_vis_curve, P_vis_curve, "s--", label="Viskos (aus Pw skaliert)")
 
-        ax3.plot(Q_vis_curve, P_vis_curve, "s--", label="Viskos (berechnet)")
         if n_ratio_opt is not None:
+            # Affinität: P ~ n^3, Q ~ n
             P_scaled = [p * (n_ratio_opt ** 3) for p in P_vis_curve]
             Q_scaled = [q * n_ratio_opt for q in Q_vis_curve]
             ax3.plot(Q_scaled, P_scaled, ":", label=f"Viskos (n≈{n_opt_rpm:.0f} rpm)")
+
         ax3.scatter([Q_vis_req], [P_vis_kW], marker="x", s=90, label="BP (viskos)")
+
         ax3.set_xlabel("Q [m³/h]")
         ax3.set_ylabel("P [kW]")
-        ax3.set_title("Q-P")
+        ax3.set_title("Q-P (Pw als Referenz)")
         ax3.grid(True)
         ax3.legend()
 
