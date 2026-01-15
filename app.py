@@ -713,15 +713,7 @@ def run_single_phase_pump():
                 use_consistent_power = st.checkbox("Konsistente Leistungsberechnung (P aus H & η)", value=True,
                                                    help="Empfohlen: Berechnet P direkt aus H und η statt Skalierung von Pw")
         
-        with st.expander("NPSH / Kavitationsprüfung", expanded=False):
-            col1, col2 = st.columns(2)
-            with col1:
-                p_suction_bar = st.number_input("Saugdruck p_s [bar abs]", min_value=0.1, value=1.013, step=0.1)
-                z_suction_m = st.number_input("Geodätische Saughöhe z_s [m]", min_value=-10.0, value=0.0, step=0.5,
-                                             help="Positiv wenn Flüssigkeitsspiegel über Pumpe, negativ wenn darunter")
-            with col2:
-                npsh_margin = st.number_input("NPSH-Sicherheitsabstand [m]", min_value=0.0, value=0.5, step=0.1)
-                check_npsh = st.checkbox("Kavitationsprüfung durchführen", value=True)
+        # NPSH / Kavitationsprüfung entfernt (auf Wunsch)
 
         conv = viscous_to_water_point(Q_vis_req, H_vis_req, nu)
         Q_water = conv["Q_water"]
@@ -808,26 +800,7 @@ def run_single_phase_pump():
             
         st.metric("Leistung n0 (bei Q, H_n0)", f"{P_throttle_kW:.2f} kW")
         
-        # NPSH-Prüfung
-        if check_npsh:
-            npsh_r = safe_interp(Q_vis_req, pump["Qw"], pump["NPSHr"])
-            npsh_a = compute_npsh_available(p_suction_bar, p_vapor, z_suction_m, rho)
-            is_safe, margin = check_cavitation(npsh_a, npsh_r, npsh_margin)
-            
-            st.subheader("⚠️ Kavitationsprüfung (NPSH)")
-            col_npsh1, col_npsh2, col_npsh3 = st.columns(3)
-            with col_npsh1:
-                st.metric("NPSH required", f"{npsh_r:.2f} m")
-            with col_npsh2:
-                st.metric("NPSH available", f"{npsh_a:.2f} m")
-            with col_npsh3:
-                st.metric("Sicherheitsabstand", f"{margin:.2f} m")
-            
-            if not is_safe:
-                st.error(f"🚨 KAVITATIONSGEFAHR! NPSH_a ({npsh_a:.2f} m) < NPSH_r ({npsh_r:.2f} m) + Sicherheit ({npsh_margin:.2f} m)")
-                st.warning("⚠️ Maßnahmen: Saugdruck erhöhen, Saughöhe reduzieren, Temperatur senken, oder Pumpe mit niedrigerem NPSH_r wählen!")
-            else:
-                st.success(f"✅ Keine Kavitationsgefahr (Sicherheitsabstand: {margin:.2f} m)")
+        # NPSH-Prüfung entfernt (auf Wunsch)
 
         st.subheader("Kennlinien")
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
@@ -889,7 +862,8 @@ def run_single_phase_pump():
             st.markdown("---")
             st.markdown("### 1) Hydraulic Institute (HI) Viskositätskorrektur")
             st.latex(r"B = 16.5 \cdot \frac{\sqrt{\nu}}{Q^{0.25}\cdot H^{0.375}} \quad (\nu \text{ in cSt, } Q \text{ in gpm, } H \text{ in ft})")
-            st.markdown(f"- Umrechnung: \(Q_{{gpm}} = Q_{{m^3/h}}\cdot 4.40287\), \(H_{{ft}} = H_{{m}}\cdot 3.28084\)")
+            st.latex(r"Q_{gpm} = Q_{m^3/h}\cdot 4.40287")
+            st.latex(r"H_{ft} = H_{m}\cdot 3.28084")
             st.markdown(f"- Eingabe: \(Q_{{vis}}={Q_vis_req:.2f}\), \(H_{{vis}}={H_vis_req:.2f}\), \\(\\nu={nu:.2f}\\) cSt → **B={B:.3f}**")
 
             st.info("Wasser-Guard aktiv: Für ν≈1 cSt wird CH=Cη=1 gesetzt, damit Wasserkennlinien identisch bleiben." if is_effectively_water(nu) else "HI-Korrektur aktiv (ν > ~1.15 cSt).")
@@ -917,18 +891,7 @@ def run_single_phase_pump():
             else:
                 st.markdown("- Keine gültige optimale Drehzahl im Bereich gefunden.")
             
-            st.markdown("### 5) Kavitationsprüfung (NPSH)")
-            if check_npsh:
-                st.latex(r"NPSH_a = \frac{p_{suction} - p_{vapor}}{\rho g} + z_{suction}")
-                st.markdown(f"- NPSH_r = {npsh_r:.2f} m (aus Kennlinie bei Q={Q_vis_req:.1f} m³/h)")
-                st.markdown(f"- NPSH_a = {npsh_a:.2f} m (berechnet aus p_s={p_suction_bar:.2f} bar, p_v={p_vapor:.4f} bar, z={z_suction_m:.1f} m)")
-                st.latex(r"\text{Sicherheit: } NPSH_a \geq NPSH_r + \Delta_{Sicherheit}")
-                if is_safe:
-                    st.success(f"✅ OK: {npsh_a:.2f} ≥ {npsh_r:.2f} + {npsh_margin:.2f} (Abstand: {margin:.2f} m)")
-                else:
-                    st.error(f"❌ KAVITATIONSGEFAHR: {npsh_a:.2f} < {npsh_r:.2f} + {npsh_margin:.2f}")
-            else:
-                st.markdown("- Kavitationsprüfung nicht aktiviert.")
+            # NPSH-Abschnitt entfernt (auf Wunsch)
 
     except Exception as e:
         show_error(e, "Einphasenpumpen")
@@ -1159,6 +1122,7 @@ def run_multi_phase_pump():
             Q_sel = float(best_pump["Q_m3h"])
             Q_lmin_sel = m3h_to_lmin(Q_sel)
             H_req_plot = dp_req * BAR_TO_M_LIQ
+            H_avail_plot = best_pump["dp_avail"] * BAR_TO_M_LIQ
             gvf_sel = float(gvf_curve_pct)
 
             max_Q_lmin = 0.0
@@ -1201,7 +1165,8 @@ def run_multi_phase_pump():
                         label=f"GVF {gvf_sel:.0f}% (ausgewählt)"
                     )
 
-            ax2.scatter(Q_lmin_sel, H_req_plot, s=110, marker="x", label="Betriebspunkt (auto Q)")
+            ax2.scatter(Q_lmin_sel, H_avail_plot, s=110, marker="x", label="Betriebspunkt (auf Kennlinie)")
+            ax2.scatter(Q_lmin_sel, H_req_plot, s=70, marker="o", facecolors="none", edgecolors="black", label="Anforderung (Δp_req)")
             ax2.set_xlabel("Volumenstrom [L/min]")
             ax2.set_ylabel("Förderhöhe [m]")
             ax2.set_title(f"Mehrphasen-Kennlinien: {pump['id']}")
