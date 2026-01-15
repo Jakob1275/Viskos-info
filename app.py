@@ -1,14 +1,3 @@
-# app.py — Streamlit Cloud lauffähig (Einphase + Mehrphase + ATEX)
-# NUR Mehrphasen-Logik wurde angepasst:
-# - Q wird NICHT vorgegeben, sondern als optimaler Betriebspunkt aus Kennlinien bestimmt
-# - Saugseite: fester Unterdruck (p_s fixed < 1 bar abs)
-# - Eingaben Mehrphase: nur Gasmenge (Norm) in Ncm³/L (Default 100), Gas, Medium, Temperatur
-# - p_req so, dass alle Einzelgase vollständig gelöst sind (bei "Luft": N2+O2)
-# - GVF basiert auf freiem Gas (nicht gelöst), inkl. Interpolation zwischen GVF-Kennlinien
-# - Rechenweg wie im Viskositätsteil ergänzt
-#
-# Sonst: Struktur/Funktionen beibehalten
-
 import math
 import warnings
 from datetime import datetime
@@ -42,7 +31,6 @@ G = 9.80665
 R_BAR_L = 0.08314462618
 P_N_BAR = 1.01325
 T_N_K = 273.15
-BAR_TO_M_WATER = 10.21
 N0_RPM_DEFAULT = 2900
 BAR_TO_PA = 1e5
 
@@ -97,7 +85,7 @@ PUMPS = [
         "Qw": [0, 10, 20, 30, 40, 50],
         "Hw": [30, 29, 27, 24, 20, 15],
         "eta": [0.35, 0.55, 0.65, 0.62, 0.55, 0.45],
-        "Pw": [1.2, 2.8, 4.2, 5.5, 6.5, 7.2],
+        "Pw": [1.2, 2.8, 4.2, 5.5, 6.5, 7.2],  # Achtung: kann von H/η abweichen (Mess-/Motorwerte etc.)
         "NPSHr": [1.0, 1.2, 1.5, 2.0, 2.5, 3.0],
         "max_viscosity": 500,
         "max_density": 1200,
@@ -184,6 +172,15 @@ def motor_iec(P_kW):
     return steps[-1]
 
 # =========================
+# Wasser-Guard (wichtig!)
+# =========================
+WATER_NU_CST = 1.0
+WATER_EPS = 0.15  # ~15% Toleranz, damit "Wasser" nicht fälschlich korrigiert wird
+
+def is_effectively_water(nu_cSt: float) -> bool:
+    return float(nu_cSt) <= (WATER_NU_CST + WATER_EPS)
+
+# =========================
 # HI Viskosität (robust)
 # =========================
 def compute_B_HI(Q_m3h, H_m, nu_cSt):
@@ -205,8 +202,17 @@ def viscosity_correction_factors(B):
     return CH, Ceta
 
 def viscous_to_water_point(Q_vis_m3h, H_vis_m, nu_cSt):
+    """
+    Wichtig: Bei "Wasser" darf KEINE HI-Korrektur aktiv werden, sonst bekommst du
+    unterschiedliche Q-P/Q-H-Kurven für Wasser vs. viskos.
+    """
     B = compute_B_HI(Q_vis_m3h, H_vis_m, nu_cSt)
-    CH, Ceta = viscosity_correction_factors(B)
+
+    if is_effectively_water(nu_cSt):
+        CH, Ceta = 1.0, 1.0
+    else:
+        CH, Ceta = viscosity_correction_factors(B)
+
     Q_water = float(Q_vis_m3h)  # CQ ~ 1 (stabil)
     H_water = float(H_vis_m) / max(CH, 1e-9)
     return {"Q_water": Q_water, "H_water": H_water, "B": B, "CH": CH, "Ceta": Ceta}
@@ -219,16 +225,39 @@ def generate_viscous_curve(pump, nu_cSt, rho):
     H_vis, eta_vis, P_vis = [], [], []
     for q, h, e in zip(Qw, Hw, etaw):
         B = compute_B_HI(q if q > 0 else 1e-6, max(h, 1e-6), nu_cSt)
-        CH, Ceta = viscosity_correction_factors(B)
+
+        # Wasser-Guard
+        if is_effectively_water(nu_cSt):
+            CH, Ceta = 1.0, 1.0
+        else:
+            CH, Ceta = viscosity_correction_factors(B)
+
         hv = h * CH
         ev = safe_clamp(e * Ceta, 0.05, 0.95)
+
         P_hyd_W = rho * G * (q / 3600.0) * hv
         pv = (P_hyd_W / max(ev, 1e-9)) / 1000.0
+
         H_vis.append(hv)
         eta_vis.append(ev)
         P_vis.append(pv)
 
     return Qw.tolist(), np.array(H_vis).tolist(), np.array(eta_vis).tolist(), np.array(P_vis).tolist()
+
+def water_power_curve_from_H_eta(pump, rho):
+    """
+    Konsistente Wasser-P-Kurve aus H(Q) und η(Q).
+    Damit ist Q-P mathematisch konsistent und nicht abhängig von pump["Pw"].
+    """
+    Qw = np.array(pump["Qw"], dtype=float)
+    Hw = np.array(pump["Hw"], dtype=float)
+    etaw = np.array(pump["eta"], dtype=float)
+
+    P = []
+    for q, h, e in zip(Qw, Hw, etaw):
+        P_hyd = rho * G * (q / 3600.0) * h
+        P.append((P_hyd / max(e, 1e-9)) / 1000.0)
+    return Qw.tolist(), P
 
 # =========================
 # Root / Drehzahl
@@ -664,6 +693,7 @@ def run_single_phase_pump():
         st.subheader("Kennlinien")
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
+        # --- Q-H ---
         ax1.plot(pump["Qw"], pump["Hw"], "o-", label="Wasser (n0)")
         ax1.plot(Q_vis_curve, H_vis_curve, "s--", label="Viskos (n0)")
         if n_ratio_opt is not None:
@@ -678,6 +708,7 @@ def run_single_phase_pump():
         ax1.grid(True)
         ax1.legend()
 
+        # --- Q-η ---
         ax2.plot(pump["Qw"], pump["eta"], "o-", label="Wasser (n0)")
         ax2.plot(Q_vis_curve, eta_vis_curve, "s--", label="Viskos (n0)")
         ax2.scatter([Q_vis_req], [eta_vis], marker="x", s=90, label="η (viskos)")
@@ -687,7 +718,12 @@ def run_single_phase_pump():
         ax2.grid(True)
         ax2.legend()
 
-        ax3.plot(pump["Qw"], pump["Pw"], "o-", label="Wasser (P Daten)")
+        # --- Q-P (konsistent!) ---
+        QwP, Pw_calc = water_power_curve_from_H_eta(pump, rho)
+        ax3.plot(QwP, Pw_calc, "o-", label="Wasser (aus H & η berechnet)")
+        # optional: original Datensatz als Vergleich (kann abweichen)
+        ax3.plot(pump["Qw"], pump["Pw"], "o:", alpha=0.6, label="Wasser (Pw Datensatz)")
+
         ax3.plot(Q_vis_curve, P_vis_curve, "s--", label="Viskos (berechnet)")
         if n_ratio_opt is not None:
             P_scaled = [p * (n_ratio_opt ** 3) for p in P_vis_curve]
@@ -707,6 +743,9 @@ def run_single_phase_pump():
             st.latex(r"B = 16.5 \cdot \frac{\sqrt{\nu}}{Q^{0.25}\cdot H^{0.375}} \quad (\nu \text{ in cSt, } Q \text{ in gpm, } H \text{ in ft})")
             st.markdown(f"- Umrechnung: \(Q_{{gpm}} = Q_{{m^3/h}}\cdot 4.40287\), \(H_{{ft}} = H_{{m}}\cdot 3.28084\)")
             st.markdown(f"- Eingabe: \(Q_{{vis}}={Q_vis_req:.2f}\), \(H_{{vis}}={H_vis_req:.2f}\), \\(\\nu={nu:.2f}\\) cSt → **B={B:.3f}**")
+
+            st.info("Wasser-Guard aktiv: Für ν≈1 cSt wird CH=Cη=1 gesetzt, damit Wasserkennlinien identisch bleiben." if is_effectively_water(nu) else "HI-Korrektur aktiv (ν > ~1.15 cSt).")
+
             st.latex(r"C_H=\exp\left(-0.165\cdot (\log_{10}(B))^{2.2}\right)")
             st.latex(r"C_\eta = 1 - 0.25\log_{10}(B) - 0.05(\log_{10}(B))^2")
             st.markdown(f"- **C_H={CH:.3f}**, **C_η={Ceta:.3f}**")
@@ -731,7 +770,7 @@ def run_multi_phase_pump():
     - Eingaben: C_ziel [Ncm³/L] (Default 100), Gas, Medium, Temperatur
     - Saugseite FIX: p_s = P_SUCTION_FIXED_BAR_ABS (Unterdruck)
     - p_req (Austritt) so, dass ALLE Einzelgase vollständig gelöst sind (bei Luft: N2+O2)
-    - dp_req = p_req - p_s => H_req
+    - dp_req = p_req - p_s => H_req (physikalisch mit rho)
     - GVF_s aus FREIEM Gas an Saugseite (gelöst zählt nicht zur GVF)
     - Q ist NICHT vorgegeben: Betriebspunkt-Q wird aus Kennlinien als optimum bestimmt
     - GVF-Kurven werden interpoliert (8/9/11% möglich)
@@ -767,6 +806,9 @@ def run_multi_phase_pump():
         nu_liq = float(MEDIA[liquid_medium]["nu"])
         p_suction = float(P_SUCTION_FIXED_BAR_ABS)
 
+        # Umrechnungsfaktor bar -> m (physikalisch mit rho)
+        BAR_TO_M_LIQ = (BAR_TO_PA) / (rho_liq * G)  # m pro bar
+
         # 1) p_req bestimmen: vollständige Lösung (optimaler Punkt)
         targets = None
         if gas_medium == "Luft":
@@ -780,7 +822,7 @@ def run_multi_phase_pump():
             H_req_m = None
         else:
             dp_req = max(0.0, float(p_req) - p_suction)
-            H_req_m = dp_req * BAR_TO_M_WATER
+            H_req_m = dp_req * BAR_TO_M_LIQ
 
         # 2) Freies Gas an Saugseite (für GVF_s)
         dissolved_s = 0.0
@@ -922,7 +964,7 @@ def run_multi_phase_pump():
             pump = best_pump["pump"]
             Q_sel = float(best_pump["Q_m3h"])
             Q_lmin_sel = m3h_to_lmin(Q_sel)
-            H_req_plot = dp_req * BAR_TO_M_WATER
+            H_req_plot = dp_req * BAR_TO_M_LIQ
 
             max_Q_lmin = 0.0
             max_H = 0.0
@@ -930,7 +972,7 @@ def run_multi_phase_pump():
             for gvf_key in sorted(pump["curves_dp_vs_Q"].keys()):
                 curve = pump["curves_dp_vs_Q"][gvf_key]
                 Q_lmin = [m3h_to_lmin(q) for q in curve["Q"]]
-                H_m = [dp * BAR_TO_M_WATER for dp in curve["dp"]]
+                H_m = [dp * BAR_TO_M_LIQ for dp in curve["dp"]]
                 max_Q_lmin = max(max_Q_lmin, max(Q_lmin))
                 max_H = max(max_H, max(H_m))
                 ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"{gvf_key}% GVF")
@@ -962,6 +1004,7 @@ def run_multi_phase_pump():
             st.markdown(f"- **C_ziel:** {C_ziel:.1f} Ncm³/L  (= {C_ziel/1e6:.6f} Nm³/L)")
             st.markdown(f"- **Gas:** {gas_medium} | **Medium:** {liquid_medium} | **T:** {temperature:.1f} °C")
             st.markdown(f"- **Sicherheitsfaktor GVF_s:** {safety_factor:.0f}%")
+            st.markdown(f"- **Umrechnung bar→m:** \(H=\\Delta p/(\\rho g)\) ⇒ 1 bar = {BAR_TO_M_LIQ:.2f} m (bei ρ={rho_liq:.0f} kg/m³)")
 
             st.markdown("### 2) Löslichkeit (Henry, Komponentenlogik)")
             st.latex(r"C_{sat}(p,T) = \text{Henry-Modell} \rightarrow \mathrm{Ncm^3/L}")
@@ -983,7 +1026,7 @@ def run_multi_phase_pump():
             if dp_req is None:
                 st.markdown("- Δp/H_req nicht berechenbar ohne p_req.")
             else:
-                st.latex(r"\Delta p = p_{req}-p_s \quad;\quad H_{req}=\Delta p\cdot 10.21")
+                st.latex(r"\Delta p = p_{req}-p_s \quad;\quad H_{req}=\frac{\Delta p\cdot 10^5}{\rho g}")
                 st.markdown(f"- Δp = {dp_req:.3f} bar → **H_req = {H_req_m:.2f} m**")
 
             st.markdown("### 4) Freies Gas an der Saugseite → GVF_s (pumpenrelevant)")
