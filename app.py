@@ -204,7 +204,7 @@ def viscosity_correction_factors(B):
 def viscous_to_water_point(Q_vis_m3h, H_vis_m, nu_cSt):
     """
     Rückrechnung von viskosem Betriebspunkt auf äquivalenten Wasser-Betriebspunkt.
-    H_vis = H_water / CH  =>  H_water = H_vis * CH
+    H_vis = H_water \cdot CH  =>  H_water = H_vis / CH
     Bei höherer Viskosität ist H_vis < H_water, daher ist CH < 1.
     Wichtig: Bei "Wasser" darf KEINE HI-Korrektur aktiv werden, sonst bekommst du
     unterschiedliche Q-P/Q-H-Kurven für Wasser vs. viskos.
@@ -217,8 +217,8 @@ def viscous_to_water_point(Q_vis_m3h, H_vis_m, nu_cSt):
         CH, Ceta = viscosity_correction_factors(B)
 
     Q_water = float(Q_vis_m3h)  # CQ ~ 1 (stabil)
-    # KORREKTUR: H_water = H_vis * CH (nicht Division!), da H_vis = H_water / CH
-    H_water = float(H_vis_m) * max(CH, 1e-9)
+    # KORREKTUR: H_water = H_vis / CH, da H_vis = H_water * CH
+    H_water = float(H_vis_m) / max(CH, 1e-9)
     return {"Q_water": Q_water, "H_water": H_water, "B": B, "CH": CH, "Ceta": Ceta}
 
 def generate_viscous_curve(pump, nu_cSt, rho, use_consistent_power=True):
@@ -249,8 +249,8 @@ def generate_viscous_curve(pump, nu_cSt, rho, use_consistent_power=True):
         else:
             CH, Ceta = viscosity_correction_factors(B)
 
-        # KORREKTUR: Bei höherer Viskosität SINKT die Förderhöhe -> Division durch CH!
-        hv = float(h) / max(float(CH), 1e-9)
+        # KORREKTUR: Bei höherer Viskosität SINKT die Förderhöhe -> Multiplikation mit CH!
+        hv = float(h) * max(float(CH), 1e-9)
         ev = safe_clamp(float(e) * float(Ceta), 0.05, 0.95)
 
         if use_consistent_power:
@@ -881,7 +881,7 @@ def run_single_phase_pump():
 
             st.markdown("---")
             st.markdown("### 5) Rückrechnung auf Wasser‑Äquivalent")
-            st.latex(r"H_{vis} = \frac{H_{water}}{C_H} \Rightarrow H_{water} = H_{vis}\cdot C_H")
+            st.latex(r"H_{vis} = H_{water}\cdot C_H \Rightarrow H_{water} = \frac{H_{vis}}{C_H}")
             st.latex(r"Q_w \approx Q_{vis} \; (C_Q \approx 1)")
             st.markdown(f"- Ergebnis: **Q_w = {Q_water:.2f} m³/h**, **H_w = {H_water:.2f} m**")
 
@@ -1134,6 +1134,7 @@ def run_multi_phase_pump():
             H_req_plot = dp_req * BAR_TO_M_LIQ
             H_avail_plot = best_pump["dp_avail"] * BAR_TO_M_LIQ
             gvf_sel = float(gvf_curve_pct)
+            n_ratio_sel = float(best_pump.get("n_ratio", 1.0))
 
             max_Q_lmin = 0.0
             max_H = 0.0
@@ -1151,28 +1152,28 @@ def run_multi_phase_pump():
                 base_keys = sorted(pump["curves_dp_vs_Q"].keys())
                 base_curve = pump["curves_dp_vs_Q"][base_keys[0]]
                 Q_interp = list(map(float, base_curve["Q"]))
-                H_interp = [
-                    _dp_at_Q_gvf(pump, q, gvf_sel)[0] * BAR_TO_M_LIQ for q in Q_interp
-                ]
+                dp_interp = [_dp_at_Q_gvf(pump, q, gvf_sel)[0] for q in Q_interp]
+                Q_interp_scaled = [q * n_ratio_sel for q in Q_interp]
+                H_interp = [dp * (n_ratio_sel ** 2) * BAR_TO_M_LIQ for dp in dp_interp]
                 ax2.plot(
-                    [m3h_to_lmin(q) for q in Q_interp],
+                    [m3h_to_lmin(q) for q in Q_interp_scaled],
                     H_interp,
                     "-",
                     linewidth=2.5,
-                    label=f"GVF≈{gvf_sel:.1f}% (interpoliert)"
+                    label=f"GVF≈{gvf_sel:.1f}% (interpoliert, n={n_ratio_sel:.2f}·n0)"
                 )
             else:
                 # Ausgewählte diskrete GVF-Kurve (BP liegt exakt darauf)
                 sel_curve = pump["curves_dp_vs_Q"].get(gvf_sel)
                 if sel_curve:
-                    Q_sel_curve = [m3h_to_lmin(q) for q in sel_curve["Q"]]
-                    H_sel_curve = [dp * BAR_TO_M_LIQ for dp in sel_curve["dp"]]
+                    Q_sel_curve = [q * n_ratio_sel for q in sel_curve["Q"]]
+                    H_sel_curve = [dp * (n_ratio_sel ** 2) * BAR_TO_M_LIQ for dp in sel_curve["dp"]]
                     ax2.plot(
-                        Q_sel_curve,
+                        [m3h_to_lmin(q) for q in Q_sel_curve],
                         H_sel_curve,
                         "-",
                         linewidth=2.5,
-                        label=f"GVF {gvf_sel:.0f}% (ausgewählt)"
+                        label=f"GVF {gvf_sel:.0f}% (ausgewählt, n={n_ratio_sel:.2f}·n0)"
                     )
 
             ax2.scatter(Q_lmin_sel, H_avail_plot, s=110, marker="x", label="Betriebspunkt (auf Kennlinie)")
@@ -1220,27 +1221,29 @@ def run_multi_phase_pump():
 
         if best_pump and dp_req is not None:
             pump = best_pump["pump"]
+            Q_sel = float(best_pump["Q_m3h"])
             gvf_plot = float(gvf_curve_pct)
             gvf_frac = safe_clamp(gvf_plot / 100.0, 0.0, 0.99)
+            n_ratio_sel = float(best_pump.get("n_ratio", 1.0))
 
             if use_interpolated_gvf:
                 base_keys = sorted(pump["curves_dp_vs_Q"].keys())
                 base_curve = pump["curves_dp_vs_Q"][base_keys[0]]
                 Q_curve = list(map(float, base_curve["Q"]))
-                dp_curve = [
-                    _dp_at_Q_gvf(pump, q, gvf_plot)[0] for q in Q_curve
-                ]
+                dp_curve = [_dp_at_Q_gvf(pump, q, gvf_plot)[0] for q in Q_curve]
             else:
                 sel_curve = pump["curves_dp_vs_Q"].get(gvf_plot)
                 Q_curve = list(map(float, sel_curve["Q"])) if sel_curve else []
                 dp_curve = list(map(float, sel_curve["dp"])) if sel_curve else []
 
             if Q_curve and dp_curve:
-                p_abs = [p_suction + dp for dp in dp_curve]
-                Q_gas_m3h = [q * (gvf_frac / (1.0 - gvf_frac)) for q in Q_curve]
+                Q_curve_scaled = [q * n_ratio_sel for q in Q_curve]
+                dp_curve_scaled = [dp * (n_ratio_sel ** 2) for dp in dp_curve]
+                p_abs = [p_suction + dp for dp in dp_curve_scaled]
+                Q_gas_m3h = [q * (gvf_frac / (1.0 - gvf_frac)) for q in Q_curve_scaled]
                 Q_gas_lmin = [m3h_to_lmin(qg) for qg in Q_gas_m3h]
                 ax3.plot(p_abs, Q_gas_lmin, "-", linewidth=2.5, color="tab:red",
-                         label=f"Gasvolumenstrom (GVF {gvf_plot:.1f}%)")
+                         label=f"Gasvolumenstrom (GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
 
                 ax3.scatter(
                     [p_suction + best_pump["dp_avail"]],
