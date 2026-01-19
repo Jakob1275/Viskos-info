@@ -721,7 +721,7 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
             Q_gas_req_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_target_cm3N_L)
 
             for cand in candidates:
-                dp_surplus = max(0.0, cand["dp_avail"] - dp_req)
+                dp_err = abs(cand["dp_avail"] - dp_req) / max(dp_req, 1e-6)
 
                 P_spec = cand["P_req"] / max(Q_req, 1e-6)
                 P_hyd_kW = (cand["dp_avail"] * BAR_TO_PA) * (Q_req / 3600.0) / 1000.0
@@ -736,12 +736,13 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                     float(w_power) * P_spec +
                     float(w_eta) * eta_term +
                     float(w_gas) * gas_err +
-                    0.05 * dp_surplus +
+                    3.0 * dp_err +
                     0.10 * abs(cand["n_ratio"] - 1.0)
                 )
                 cand["score"] = score
                 cand["eta_est"] = eta_est
                 cand["gas_err"] = gas_err
+                cand["dp_err"] = dp_err
                 if best is None or score < best["score"]:
                     best = cand
 
@@ -1223,6 +1224,8 @@ def run_multi_phase_pump():
                 st.metric("Betriebspunkt Q", f"{best_pump['Q_m3h']:.2f} m³/h")
             with p2:
                 st.metric("Δp verfügbar", f"{best_pump['dp_avail']:.2f} bar")
+                if "dp_err" in best_pump:
+                    st.metric("Δp Abweichung", f"{best_pump['dp_err']*100:.1f}%")
             with p3:
                 st.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
             with p4:
