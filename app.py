@@ -1039,7 +1039,7 @@ def run_multi_phase_pump():
     try:
         st.header("Mehrphasenpumpen-Auslegung (Q automatisch, Unterdruck Saugseite, vollständige Lösung)")
 
-        with st.expander("Eingaben (Mehrphase) – aufklappen", expanded=True):
+        with st.expander("Eingaben – aufklappen", expanded=True):
             c1, c2, c3 = st.columns([1, 1, 1])
 
             with c1:
@@ -1062,7 +1062,7 @@ def run_multi_phase_pump():
                 use_cziel_as_gvf = st.checkbox(
                     "GVF-Kennlinie aus C_ziel (Normvolumen-%)",
                     value=False,
-                    help="Wenn aktiv: C_ziel [Ncm³/L] wird direkt auf GVF-Kennlinie gemappt (100 Ncm³/L → 10%)."
+                    help="Wenn aktiv: C_ziel [Ncm³/L] wird physikalisch in GVF_s an der Saugseite umgerechnet."
                 )
                 use_interpolated_gvf = st.checkbox(
                     "GVF interpolieren (zwischen Kennlinien)",
@@ -1116,8 +1116,10 @@ def run_multi_phase_pump():
             gvf_ref_gas = gas_medium
 
         if use_cziel_as_gvf:
-            # Direkte Zuordnung Normvolumen-%% -> Kennlinien-GVF (100 Ncm³/L → 10%)
-            gvf_s_pct = safe_clamp(float(C_ziel) / 10.0, 0.0, 99.0)
+            # Physikalisch: Normvolumen -> GVF_s an der Saugseite (p,T,Z)
+            gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(
+                C_ziel, p_suction, temperature, gvf_ref_gas
+            )
         else:
             gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(free_s, p_suction, temperature, gvf_ref_gas)
         gvf_s_pct_safe = gvf_s_pct * (1.0 + safety_factor / 100.0)
