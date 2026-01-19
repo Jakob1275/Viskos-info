@@ -249,6 +249,13 @@ def gas_flow_oper_lmin_from_gvf(Q_liq_m3h, gvf_pct):
     Q_gas_m3h = float(Q_liq_m3h) * (gvf_frac / max(1.0 - gvf_frac, 1e-9))
     return m3h_to_lmin(Q_gas_m3h)
 
+def cm3N_L_from_gvf_pct_at_suction(gvf_pct, p_suction_bar_abs, T_celsius, gas):
+    gvf_frac = safe_clamp(float(gvf_pct) / 100.0, 0.0, 0.99)
+    Vgas_oper_L_per_L = gvf_frac / max(1.0 - gvf_frac, 1e-9)
+    ratio = oper_to_norm_ratio(p_suction_bar_abs, T_celsius, gas)
+    Vn_L_per_L = Vgas_oper_L_per_L * ratio
+    return Vn_L_per_L * 1000.0
+
 def motor_iec(P_kW):
     steps = [0.12, 0.18, 0.25, 0.37, 0.55, 0.75, 1.1, 1.5, 2.2, 3.0, 4.0, 5.5,
              7.5, 11, 15, 18.5, 22, 30, 37, 45, 55, 75, 90, 110, 132, 160, 200]
@@ -1169,8 +1176,6 @@ def run_multi_phase_pump():
         with r3:
             st.metric("GVF_s (frei)", f"{gvf_s_pct:.2f}%")
             st.metric("GVF_s (+Sicherheit)", f"{gvf_s_pct_safe:.2f}%")
-            gvf_label = f"{gvf_curve_pct:.1f}%" if use_interpolated_gvf else f"{gvf_curve_pct:.0f}%"
-            st.metric("GVF-Kennlinie", gvf_label)
         with r4:
             if p_req is None:
                 st.warning("p_req nicht erreichbar (0.2…200 bar) – Ziel zu hoch im Modell.")
@@ -1179,6 +1184,7 @@ def run_multi_phase_pump():
                 st.metric("Förderhöhe H_req", f"{H_req_m:.1f} m")
 
         if best_pump and dp_req is not None:
+            c_oper_ncm3l = cm3N_L_from_gvf_pct_at_suction(gvf_curve_pct, p_suction, temperature, gvf_ref_gas)
             gvf_src = "aus C_ziel" if use_cziel_as_gvf else "physikalisch"
             gvf_display = f"{gvf_curve_pct:.1f}%" if use_interpolated_gvf else f"{gvf_curve_pct:.0f}%"
             gvf_mode = "interpoliert" if use_interpolated_gvf else "diskret"
@@ -1194,6 +1200,7 @@ def run_multi_phase_pump():
                 st.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
             with p4:
                 st.metric("Drehzahl / Modus", f"{best_pump['n_rpm']:.0f} rpm | {best_pump['mode']}")
+            st.metric("Gasgehalt am Betriebspunkt", f"{c_oper_ncm3l:.1f} Ncm³/L")
             if "eta_est" in best_pump:
                 st.caption(
                     f"Score‑Details: η_est={best_pump['eta_est']:.2f} | Gas‑Abweichung={best_pump['gas_err']*100:.1f}%"
