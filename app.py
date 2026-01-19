@@ -1084,6 +1084,11 @@ def run_multi_phase_pump():
                 w_gas = st.slider("Gewicht Luftmenge", 0.0, 1.0, 0.2, 0.05)
                 show_temp_band = st.checkbox("Temperaturband im Löslichkeitsdiagramm", value=True)
                 show_ref_targets = st.checkbox("Referenzlinien (50/100/150 Ncm³/L)", value=True)
+                show_speed_alt = st.checkbox(
+                    "Drehzahlanpassung als Alternative anzeigen",
+                    value=True,
+                    help="Vergleicht n0-Betrieb mit Drehzahlanpassung und zeigt mögliche Energieeinsparung."
+                )
 
         rho_liq = float(MEDIA[liquid_medium]["rho"])
         nu_liq = float(MEDIA[liquid_medium]["nu"])
@@ -1207,6 +1212,70 @@ def run_multi_phase_pump():
                 st.caption(
                     f"Score‑Details: η_est={best_pump['eta_est']:.2f} | Gas‑Abweichung={best_pump['gas_err']*100:.1f}%"
                 )
+
+            if show_speed_alt:
+                pump_sel = best_pump["pump"]
+                Q_req_sel = float(best_pump["Q_m3h"])
+                gvf_sel = float(gvf_curve_pct)
+
+                def _build_speed_candidates(pump, Q_req, dp_req, gvf_pct, n_min_ratio=0.5, n_max_ratio=1.2):
+                    cand = {}
+                    dp_nom, _, _, _ = _dp_at_Q_gvf(pump, Q_req, gvf_pct)
+                    if dp_nom >= dp_req:
+                        P_nom, _, _, _ = _P_at_Q_gvf(pump, Q_req, gvf_pct)
+                        cand["nominal"] = {
+                            "dp": dp_nom,
+                            "P": P_nom,
+                            "n_ratio": 1.0,
+                            "n_rpm": pump["n0_rpm"],
+                        }
+
+                    def dp_at_ratio(nr):
+                        if nr <= 0:
+                            return 0.0
+                        Q_base = Q_req / nr
+                        dp_base, _, _, _ = _dp_at_Q_gvf(pump, Q_base, gvf_pct)
+                        return dp_base * (nr ** 2)
+
+                    def f(nr):
+                        return dp_at_ratio(nr) - dp_req
+
+                    n_ratio = bisect_root(f, n_min_ratio, n_max_ratio, it=80, tol=1e-4)
+                    if n_ratio is None:
+                        n_ratio = find_best_ratio_by_scan(dp_at_ratio, dp_req, n_min_ratio, n_max_ratio, steps=60, prefer_above=True)
+
+                    if n_ratio is not None:
+                        Q_base = Q_req / n_ratio
+                        dp_scaled = dp_at_ratio(n_ratio)
+                        if dp_scaled >= dp_req:
+                            P_base, _, _, _ = _P_at_Q_gvf(pump, Q_base, gvf_pct)
+                            P_scaled = P_base * (n_ratio ** 3)
+                            cand["vfd"] = {
+                                "dp": dp_scaled,
+                                "P": P_scaled,
+                                "n_ratio": n_ratio,
+                                "n_rpm": pump["n0_rpm"] * n_ratio,
+                            }
+                    return cand
+
+                cand_map = _build_speed_candidates(pump_sel, Q_req_sel, float(dp_req), gvf_sel)
+                if "nominal" in cand_map and "vfd" in cand_map:
+                    P_nom = cand_map["nominal"]["P"]
+                    P_vfd = cand_map["vfd"]["P"]
+                    saving_pct = ((P_nom - P_vfd) / P_nom * 100.0) if P_nom > 0 else 0.0
+
+                    st.markdown("**Drehzahlanpassung (Alternative) – Energievergleich**")
+                    a1, a2, a3, a4 = st.columns(4)
+                    with a1:
+                        st.metric("Leistung n0", f"{P_nom:.2f} kW")
+                    with a2:
+                        st.metric("Leistung angepasst", f"{P_vfd:.2f} kW")
+                    with a3:
+                        st.metric("n angepasst", f"{cand_map['vfd']['n_rpm']:.0f} rpm")
+                    with a4:
+                        st.metric("Energieeinsparung", f"{saving_pct:.1f}%")
+                else:
+                    st.info("Drehzahlanpassung als Alternative nicht darstellbar (Δp oder n‑Grenzen).")
         else:
             st.info("Keine geeignete Mehrphasenpumpe gefunden (oder p_req nicht bestimmbar).")
 
