@@ -1148,6 +1148,21 @@ def run_multi_phase_pump():
         frac_diss_s = (dissolved_s / C_ziel * 100.0) if C_ziel > 0 else 0.0
         frac_free_s = (free_s / C_ziel * 100.0) if C_ziel > 0 else 0.0
 
+        def dissolved_free_at_pressure(p_abs_bar):
+            dissolved = 0.0
+            free = 0.0
+            if gas_medium == "Luft":
+                for g, y in AIR_COMPONENTS:
+                    C_i = targets.get(g, float(C_ziel) * float(y))
+                    C_sat_i = gas_solubility_cm3N_per_L(g, p_abs_bar, temperature, y_gas=y)
+                    dissolved += min(C_i, C_sat_i)
+                    free += max(0.0, C_i - C_sat_i)
+            else:
+                C_sat = gas_solubility_cm3N_per_L(gas_medium, p_abs_bar, temperature, y_gas=1.0)
+                dissolved = min(float(C_ziel), C_sat)
+                free = max(0.0, float(C_ziel) - C_sat)
+            return dissolved, free
+
         # 3) Pumpenauswahl: Q automatisch
         best_pump = None
         w_sum = max(float(w_power + w_eta + w_gas), 1e-9)
@@ -1196,7 +1211,7 @@ def run_multi_phase_pump():
 
         if best_pump and dp_req is not None:
             p_discharge = p_suction + float(best_pump["dp_avail"])
-            c_free_discharge = cm3N_L_from_gvf_pct_at_suction(gvf_curve_pct, p_discharge, temperature, gvf_ref_gas)
+            dissolved_d, free_d = dissolved_free_at_pressure(p_discharge)
             gvf_src = "aus C_ziel" if use_cziel_as_gvf else "physikalisch"
             gvf_display = f"{gvf_curve_pct:.1f}%" if use_interpolated_gvf else f"{gvf_curve_pct:.0f}%"
             gvf_mode = "interpoliert" if use_interpolated_gvf else "diskret"
@@ -1213,7 +1228,7 @@ def run_multi_phase_pump():
             with p4:
                 st.metric("Drehzahl / Modus", f"{best_pump['n_rpm']:.0f} rpm | {best_pump['mode']}")
             st.metric("Gelöst (Druckseite, Ziel)", f"{C_ziel:.1f} Ncm³/L")
-            st.metric("Freies Gas (Druckseite)", f"{c_free_discharge:.1f} Ncm³/L")
+            st.metric("Freies Gas (Druckseite)", f"{free_d:.1f} Ncm³/L")
             if "eta_est" in best_pump:
                 st.caption(
                     f"Score‑Details: η_est={best_pump['eta_est']:.2f} | Gas‑Abweichung={best_pump['gas_err']*100:.1f}%"
@@ -1272,13 +1287,13 @@ def run_multi_phase_pump():
 
                     st.markdown("**Drehzahlanpassung (Alternative) – Energievergleich**")
                     p_discharge_vfd = p_suction + float(cand_map["vfd"]["dp"])
-                    c_free_vfd = cm3N_L_from_gvf_pct_at_suction(gvf_sel, p_discharge_vfd, temperature, gvf_ref_gas)
+                    dissolved_vfd, free_vfd = dissolved_free_at_pressure(p_discharge_vfd)
 
                     a1, a2, a3, a4 = st.columns(4)
                     with a1:
                         st.metric("Gelöst (Druckseite, Ziel)", f"{C_ziel:.1f} Ncm³/L")
                     with a2:
-                        st.metric("Freies Gas (Druckseite)", f"{c_free_vfd:.1f} Ncm³/L")
+                        st.metric("Freies Gas (Druckseite)", f"{free_vfd:.1f} Ncm³/L")
                     with a3:
                         st.metric("n angepasst", f"{cand_map['vfd']['n_rpm']:.0f} rpm")
                     with a4:
@@ -1557,9 +1572,9 @@ def run_multi_phase_pump():
             st.latex(r"C_{op,N} \approx \frac{GVF}{1-GVF}\cdot \frac{p}{p_N}\cdot \frac{T_N}{T}\cdot \frac{1}{Z}\;\;[\mathrm{Ncm^3/L}]")
             if best_pump and dp_req is not None:
                 p_discharge = p_suction + float(best_pump["dp_avail"])
-                c_free_discharge = cm3N_L_from_gvf_pct_at_suction(gvf_curve_pct, p_discharge, temperature, gvf_ref_gas)
+                dissolved_d, free_d = dissolved_free_at_pressure(p_discharge)
                 st.markdown(f"- Gelöst (Druckseite, Ziel): **{C_ziel:.1f} Ncm³/L**")
-                st.markdown(f"- Freies Gas (Druckseite, aus GVF): **{c_free_discharge:.1f} Ncm³/L**")
+                st.markdown(f"- Freies Gas (Druckseite, aus Löslichkeit): **{free_d:.1f} Ncm³/L**")
 
             st.markdown("---")
             st.markdown("### 6) Pumpenauswahl & Affinitätsgesetze")
