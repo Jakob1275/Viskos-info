@@ -1245,6 +1245,7 @@ def run_multi_phase_pump():
 
             if p_req is not None:
                 ax1.scatter([p_req], [C_ziel], s=110, marker="^", label="p_req (Luft)")
+                ax1.axvline(p_req, linestyle=":", alpha=0.6, label="p_req")
 
         else:
             if show_temp_band:
@@ -1261,6 +1262,7 @@ def run_multi_phase_pump():
 
             if p_req is not None:
                 ax1.scatter([p_req], [C_ziel], s=110, marker="^", label="p_req")
+                ax1.axvline(p_req, linestyle=":", alpha=0.6, label="p_req")
 
         if show_ref_targets:
             for Cref in [50.0, 100.0, 150.0]:
