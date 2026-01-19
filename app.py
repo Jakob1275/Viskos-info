@@ -1269,9 +1269,12 @@ def run_multi_phase_pump():
                     saving_pct = ((P_nom - P_vfd) / P_nom * 100.0) if P_nom > 0 else 0.0
 
                     st.markdown("**Drehzahlanpassung (Alternative) – Energievergleich**")
+                    p_abs_vfd = p_suction + float(cand_map["vfd"]["dp"])
+                    c_oper_vfd = cm3N_L_from_gvf_pct_at_suction(gvf_sel, p_abs_vfd, temperature, gvf_ref_gas)
+
                     a1, a2, a3, a4 = st.columns(4)
                     with a1:
-                        st.metric("Leistung n0", f"{P_nom:.2f} kW")
+                        st.metric("Gasgehalt (angepasst)", f"{c_oper_vfd:.1f} Ncm³/L")
                     with a2:
                         st.metric("Leistung angepasst", f"{P_vfd:.2f} kW")
                     with a3:
