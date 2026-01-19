@@ -1196,7 +1196,7 @@ def run_multi_phase_pump():
 
         if best_pump and dp_req is not None:
             p_discharge = p_suction + float(best_pump["dp_avail"])
-            c_oper_ncm3l = cm3N_L_from_gvf_pct_at_suction(gvf_curve_pct, p_discharge, temperature, gvf_ref_gas)
+            c_free_discharge = cm3N_L_from_gvf_pct_at_suction(gvf_curve_pct, p_discharge, temperature, gvf_ref_gas)
             gvf_src = "aus C_ziel" if use_cziel_as_gvf else "physikalisch"
             gvf_display = f"{gvf_curve_pct:.1f}%" if use_interpolated_gvf else f"{gvf_curve_pct:.0f}%"
             gvf_mode = "interpoliert" if use_interpolated_gvf else "diskret"
@@ -1212,7 +1212,8 @@ def run_multi_phase_pump():
                 st.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
             with p4:
                 st.metric("Drehzahl / Modus", f"{best_pump['n_rpm']:.0f} rpm | {best_pump['mode']}")
-            st.metric("Gasgehalt (Druckseite)", f"{c_oper_ncm3l:.1f} Ncm³/L")
+            st.metric("Gelöst (Druckseite, Ziel)", f"{C_ziel:.1f} Ncm³/L")
+            st.metric("Freies Gas (Druckseite)", f"{c_free_discharge:.1f} Ncm³/L")
             if "eta_est" in best_pump:
                 st.caption(
                     f"Score‑Details: η_est={best_pump['eta_est']:.2f} | Gas‑Abweichung={best_pump['gas_err']*100:.1f}%"
@@ -1271,13 +1272,13 @@ def run_multi_phase_pump():
 
                     st.markdown("**Drehzahlanpassung (Alternative) – Energievergleich**")
                     p_discharge_vfd = p_suction + float(cand_map["vfd"]["dp"])
-                    c_oper_vfd = cm3N_L_from_gvf_pct_at_suction(gvf_sel, p_discharge_vfd, temperature, gvf_ref_gas)
+                    c_free_vfd = cm3N_L_from_gvf_pct_at_suction(gvf_sel, p_discharge_vfd, temperature, gvf_ref_gas)
 
                     a1, a2, a3, a4 = st.columns(4)
                     with a1:
-                        st.metric("Gasgehalt (Druckseite, angepasst)", f"{c_oper_vfd:.1f} Ncm³/L")
+                        st.metric("Gelöst (Druckseite, Ziel)", f"{C_ziel:.1f} Ncm³/L")
                     with a2:
-                        st.metric("Leistung angepasst", f"{P_vfd:.2f} kW")
+                        st.metric("Freies Gas (Druckseite)", f"{c_free_vfd:.1f} Ncm³/L")
                     with a3:
                         st.metric("n angepasst", f"{cand_map['vfd']['n_rpm']:.0f} rpm")
                     with a4:
@@ -1556,8 +1557,9 @@ def run_multi_phase_pump():
             st.latex(r"C_{op,N} \approx \frac{GVF}{1-GVF}\cdot \frac{p}{p_N}\cdot \frac{T_N}{T}\cdot \frac{1}{Z}\;\;[\mathrm{Ncm^3/L}]")
             if best_pump and dp_req is not None:
                 p_discharge = p_suction + float(best_pump["dp_avail"])
-                c_oper_ncm3l = cm3N_L_from_gvf_pct_at_suction(gvf_curve_pct, p_discharge, temperature, gvf_ref_gas)
-                st.markdown(f"- Gasgehalt am Betriebspunkt (Druckseite): **{c_oper_ncm3l:.1f} Ncm³/L**")
+                c_free_discharge = cm3N_L_from_gvf_pct_at_suction(gvf_curve_pct, p_discharge, temperature, gvf_ref_gas)
+                st.markdown(f"- Gelöst (Druckseite, Ziel): **{C_ziel:.1f} Ncm³/L**")
+                st.markdown(f"- Freies Gas (Druckseite, aus GVF): **{c_free_discharge:.1f} Ncm³/L**")
 
             st.markdown("---")
             st.markdown("### 6) Pumpenauswahl & Affinitätsgesetze")
