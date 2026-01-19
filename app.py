@@ -1232,26 +1232,19 @@ def run_multi_phase_pump():
                     for T in [temperature - 10, temperature, temperature + 10]:
                         if -10 <= T <= 150:
                             p_arr, sol_arr = solubility_diagonal_curve(g, T, y_gas=y)
-                            ax1.plot(p_arr, sol_arr, "--", alpha=0.6, label=f"{g} (y={y:.2f}) @ {T:.0f}°C")
+                            ax1.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
                 else:
                     p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
-                    ax1.plot(p_arr, sol_arr, "--", label=f"{g} (y={y:.2f})")
+                    ax1.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
 
-            for g, y in AIR_COMPONENTS:
-                C_i = targets.get(g, float(C_ziel) * float(y))
-                ax1.axhline(C_i, linestyle=":", alpha=0.7)
-                ax1.text(13.8, C_i, f"Ziel {g}", va="center", ha="right", fontsize=8)
+            ax1.axhline(C_ziel, linestyle=":", alpha=0.9, label="C_ziel (Luft)")
+            ax1.text(13.8, C_ziel, "C_ziel (Luft)", va="center", ha="right", fontsize=8)
 
-            for g, y in AIR_COMPONENTS:
-                Csat_s = gas_solubility_cm3N_per_L(g, p_suction, temperature, y_gas=y)
-                ax1.scatter([p_suction], [Csat_s], s=60, label=f"C_sat,s {g}")
+            Csat_s_mix = gas_solubility_cm3N_per_L("Luft", p_suction, temperature, y_gas=1.0)
+            ax1.scatter([p_suction], [Csat_s_mix], s=60, label="C_sat @ p_s (Luft)")
 
             if p_req is not None:
-                for g, y in AIR_COMPONENTS:
-                    C_i = targets.get(g, float(C_ziel) * float(y))
-                    ax1.scatter([p_req], [C_i], s=85, marker="^")
-                ax1.scatter([p_req], [min([targets[g] for g, _ in AIR_COMPONENTS])],
-                            s=110, marker="^", label="p_req (alle gelöst)")
+                ax1.scatter([p_req], [C_ziel], s=110, marker="^", label="p_req (Luft)")
 
         else:
             if show_temp_band:
@@ -1265,9 +1258,6 @@ def run_multi_phase_pump():
 
             ax1.axhline(C_ziel, linestyle=":", alpha=0.8)
             ax1.text(13.8, C_ziel, "C_ziel", va="center", ha="right", fontsize=9)
-
-            Csat_s = gas_solubility_cm3N_per_L(gas_medium, p_suction, temperature, y_gas=1.0)
-            ax1.scatter([p_suction], [Csat_s], s=80, label="C_sat @ p_s")
 
             if p_req is not None:
                 ax1.scatter([p_req], [C_ziel], s=110, marker="^", label="p_req")
