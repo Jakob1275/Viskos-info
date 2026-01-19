@@ -1230,8 +1230,7 @@ def run_multi_phase_pump():
                 st.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
             with p4:
                 st.metric("Drehzahl / Modus", f"{best_pump['n_rpm']:.0f} rpm | {best_pump['mode']}")
-            st.metric("Gelöst (Druckseite, Ziel)", f"{C_ziel:.1f} Ncm³/L")
-            st.metric("Freies Gas (Druckseite)", f"{free_d:.1f} Ncm³/L")
+            st.metric("Gelöst (Druckseite)", f"{dissolved_d:.1f} Ncm³/L")
             if "eta_est" in best_pump:
                 st.caption(
                     f"Score‑Details: η_est={best_pump['eta_est']:.2f} | Gas‑Abweichung={best_pump['gas_err']*100:.1f}%"
@@ -1294,7 +1293,7 @@ def run_multi_phase_pump():
 
                     a1, a2, a3, a4 = st.columns(4)
                     with a1:
-                        st.metric("Gelöst (Druckseite, Ziel)", f"{C_ziel:.1f} Ncm³/L")
+                        st.metric("Gelöst (Druckseite)", f"{dissolved_vfd:.1f} Ncm³/L")
                     with a2:
                         st.metric("Freies Gas (Druckseite)", f"{free_vfd:.1f} Ncm³/L")
                     with a3:
@@ -1576,7 +1575,7 @@ def run_multi_phase_pump():
             if best_pump and dp_req is not None:
                 p_discharge = p_suction + float(best_pump["dp_avail"])
                 dissolved_d, free_d = dissolved_free_at_pressure(p_discharge)
-                st.markdown(f"- Gelöst (Druckseite, Ziel): **{C_ziel:.1f} Ncm³/L**")
+                st.markdown(f"- Gelöst (Druckseite): **{dissolved_d:.1f} Ncm³/L**")
                 st.markdown(f"- Freies Gas (Druckseite, aus Löslichkeit): **{free_d:.1f} Ncm³/L**")
 
             st.markdown("---")
