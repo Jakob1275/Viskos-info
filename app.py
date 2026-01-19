@@ -692,7 +692,12 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                     })
 
             for cand in candidates:
-                score = abs(cand["dp_avail"] - dp_req) + 0.15 * abs(cand["n_ratio"] - 1.0) + 0.02 * cand["P_req"]
+                dp_surplus = max(0.0, cand["dp_avail"] - dp_req)
+                score = (
+                    1.00 * cand["P_req"] +
+                    0.20 * abs(cand["n_ratio"] - 1.0) +
+                    0.05 * dp_surplus
+                )
                 cand["score"] = score
                 if best is None or score < best["score"]:
                     best = cand
