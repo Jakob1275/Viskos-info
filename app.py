@@ -1216,6 +1216,15 @@ def run_multi_phase_pump():
 
         # --- Löslichkeit ---
         if gas_medium == "Luft":
+            if show_temp_band:
+                for T in [temperature - 10, temperature, temperature + 10]:
+                    if -10 <= T <= 150:
+                        p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
+                        ax1.plot(p_arr, sol_arr, "-", alpha=0.7, label=f"Luft (Gemisch) @ {T:.0f}°C")
+            else:
+                p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
+                ax1.plot(p_arr, sol_arr, "-", label=f"Luft (Gemisch) @ {temperature:.0f}°C")
+
             for g, y in AIR_COMPONENTS:
                 if show_temp_band:
                     for T in [temperature - 10, temperature, temperature + 10]:
@@ -1341,6 +1350,15 @@ def run_multi_phase_pump():
 
         # --- Solubility + Pump curve vs pressure ---
         if gas_medium == "Luft":
+            if show_temp_band:
+                for T in [temperature - 10, temperature, temperature + 10]:
+                    if -10 <= T <= 150:
+                        p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
+                        ax3.plot(p_arr, sol_arr, "-", alpha=0.7, label=f"Luft (Gemisch) @ {T:.0f}°C")
+            else:
+                p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
+                ax3.plot(p_arr, sol_arr, "-", label=f"Luft (Gemisch) @ {temperature:.0f}°C")
+
             for g, y in AIR_COMPONENTS:
                 if show_temp_band:
                     for T in [temperature - 10, temperature, temperature + 10]:
@@ -1407,32 +1425,42 @@ def run_multi_phase_pump():
         st.pyplot(fig)
 
         # =========================
-        # Rechenweg (wie Viskosität)
+        # Rechenweg (Mehrphase)
         # =========================
         with st.expander("Detaillierter Rechenweg (Mehrphase)"):
-            st.markdown("### 1) Eingaben & Annahmen")
-            st.markdown(f"- **p_s (fix, Unterdruck):** {p_suction:.2f} bar(abs)")
+            st.markdown("### 0) Überblick")
+            st.markdown(
+                "Ziel: Aus **C_ziel**, Gas/Medium und Temperatur den erforderlichen Druck bestimmen, "
+                "GVF_s an der Saugseite ableiten, eine passende GVF‑Kennlinie wählen und anschließend "
+                "die energetisch optimale Pumpe (gewichtete Kombination) bestimmen."
+            )
+
+            st.markdown("---")
+            st.markdown("### 1) Eingaben & Basisgrößen")
+            st.markdown(f"- **p_s (fix):** {p_suction:.2f} bar(abs)")
             st.markdown(f"- **C_ziel:** {C_ziel:.1f} Ncm³/L  (= {C_ziel/1e6:.6f} Nm³/L)")
             st.markdown(f"- **Gas:** {gas_medium} | **Medium:** {liquid_medium} | **T:** {temperature:.1f} °C")
             st.markdown(f"- **Sicherheitsfaktor GVF_s:** {safety_factor:.0f}%")
             st.markdown(f"- **Umrechnung bar→m:** \(H=\\Delta p/(\\rho g)\) ⇒ 1 bar = {BAR_TO_M_LIQ:.2f} m (bei ρ={rho_liq:.0f} kg/m³)")
 
+            st.markdown("---")
             st.markdown("### 2) Löslichkeit & Zielbedingung")
             st.latex(r"C_{sat}(p,T)=\text{Henry-Modell} \rightarrow \mathrm{Ncm^3/L}")
             st.markdown("**Ziel:** vollständige Lösung des Gases in der Flüssigkeit.")
             if gas_medium == "Luft":
                 st.markdown("- Luft wird als **N₂ (79%) + O₂ (21%)** modelliert.")
                 for g, y in AIR_COMPONENTS:
-                    st.markdown(f"  - Ziel {g}: \(C_i = y\cdot C_{{ziel}} = {targets[g]:.1f}\) Ncm³/L")
+                    st.markdown(f"  - Ziel {g}:")
+                    st.latex(rf"C_i = y\cdot C_{{ziel}} = {targets[g]:.1f}\;\mathrm{{Ncm^3/L}}")
                 st.latex(r"p_{req}=\max_i\{p_{req,i}\}\quad\text{mit}\quad C_{sat,i}(p_{req,i},T)\ge C_i")
             else:
                 st.latex(r"C_{sat}(p_{req},T)\ge C_{ziel}")
-
             if p_req is None:
                 st.warning("p_req konnte im Bereich 0.2…200 bar nicht gefunden werden (Ziel zu hoch im Modell).")
             else:
                 st.markdown(f"- Ergebnis: **p_req = {p_req:.2f} bar(abs)**")
 
+            st.markdown("---")
             st.markdown("### 3) Druckhub & Förderhöhe")
             if dp_req is None:
                 st.markdown("- Δp/H_req nicht berechenbar ohne p_req.")
@@ -1440,21 +1468,27 @@ def run_multi_phase_pump():
                 st.latex(r"\Delta p = p_{req}-p_s \quad;\quad H_{req}=\frac{\Delta p\cdot 10^5}{\rho g}")
                 st.markdown(f"- Δp = {dp_req:.3f} bar → **H_req = {H_req_m:.2f} m**")
 
+            st.markdown("---")
             st.markdown("### 4) Freies Gas an der Saugseite → GVF_s")
             st.latex(r"C_{free,s}=\max(0, C_{ziel}-C_{sat}(p_s,T)) \quad(\text{bzw. Summe über Komponenten})")
             st.markdown(f"- @p_s: gelöst = {dissolved_s:.1f} Ncm³/L, frei = {free_s:.1f} Ncm³/L")
             st.latex(r"GVF_s=\frac{V_{gas,op}}{1+V_{gas,op}}\cdot 100\%")
             st.markdown(f"- GVF_s = {gvf_s_pct:.2f}% → mit Sicherheit: **{gvf_s_pct_safe:.2f}%**")
 
-            st.markdown("### 5) Wahl der GVF-Kennlinie")
+            st.markdown("---")
+            st.markdown("### 5) GVF‑Kennlinie & Gasgehalt am Betriebspunkt")
             gvf_src = "aus C_ziel" if use_cziel_as_gvf else "physikalisch (GVF_s)"
             gvf_mode = "interpoliert" if use_interpolated_gvf else "diskret"
             st.markdown(
-                f"- Quelle: **{gvf_src}**, Modus: **{gvf_mode}** → GVF-Kennlinie = **{gvf_curve_pct:.2f}%**"
+                f"- Quelle: **{gvf_src}**, Modus: **{gvf_mode}** → GVF‑Kennlinie = **{gvf_curve_pct:.2f}%**"
             )
-            st.markdown("- Im Interpolationsmodus liegt der Betriebspunkt exakt auf der interpolierten GVF-Kurve.")
+            st.latex(r"C_{op,N} \approx \frac{GVF}{1-GVF}\cdot \frac{p}{p_N}\cdot \frac{T_N}{T}\cdot \frac{1}{Z}\;\;[\mathrm{Ncm^3/L}]")
+            if best_pump and dp_req is not None:
+                c_oper_ncm3l = cm3N_L_from_gvf_pct_at_suction(gvf_curve_pct, p_suction, temperature, gvf_ref_gas)
+                st.markdown(f"- Gasgehalt am Betriebspunkt: **{c_oper_ncm3l:.1f} Ncm³/L**")
 
-            st.markdown("### 6) Pumpenauswahl & Kennlinienanpassung")
+            st.markdown("---")
+            st.markdown("### 6) Pumpenauswahl & Affinitätsgesetze")
             st.latex(r"\Delta p(Q,n)=\Delta p(Q/n,n_0)\cdot (n/n_0)^2")
             st.latex(r"P(n)=P(n_0)\cdot (n/n_0)^3")
             if best_pump:
@@ -1469,6 +1503,15 @@ def run_multi_phase_pump():
                     st.markdown(f"- Vergleich: Δp_req={dp_req:.2f} bar ↔ Δp_avail={best_pump['dp_avail']:.2f} bar")
             else:
                 st.markdown("- Keine geeignete Pumpe im Datensatz gefunden (oder p_req nicht bestimmbar).")
+
+            st.markdown("---")
+            st.markdown("### 7) Optimierungsziel (gewichtete Kombination)")
+            st.markdown(
+                "Die Auswahl minimiert eine gewichtete Zielfunktion aus **Energie**, **Wirkungsgrad** "
+                "und **Gasmenge**, zusätzlich mit kleinen Strafanteilen für Drucküberschuss und "
+                "Drehzahlabweichung."
+            )
+            st.latex(r"\text{Score}=w_P\cdot P_{spec} + w_\eta\cdot(1-\eta_{est}) + w_g\cdot\varepsilon_{gas}")
 
     except Exception as e:
         show_error(e, "Mehrphasenpumpen")
