@@ -648,7 +648,8 @@ def _P_at_Q_gvf(pump, Q_m3h, gvf_pct):
 def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho_liq,
                         n_min_ratio=0.5, n_max_ratio=1.2,
                         w_power=0.5, w_eta=0.3, w_gas=0.2,
-                        C_target_cm3N_L=0.0, p_suction_bar_abs=1.0, T_celsius=20.0, gas_medium="Luft"):
+                        C_target_cm3N_L=0.0, p_suction_bar_abs=1.0, T_celsius=20.0, gas_medium="Luft",
+                        allow_speed_adjustment=False):
     """
     Wählt beste Pumpe bei vorgegebenem Q und dp.
     Interpolation zwischen GVF-Kurven (auch 8/9/11% möglich).
@@ -699,7 +700,7 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                     "Q_m3h": Q_req,
                 })
 
-            if n_ratio is not None:
+            if allow_speed_adjustment and n_ratio is not None:
                 Q_base = Q_req / n_ratio
                 dp_scaled = dp_at_ratio(n_ratio)
                 if dp_scaled >= dp_req:
@@ -752,7 +753,8 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
 def choose_best_mph_pump_autoQ(pumps, dp_req_bar, gvf_free_pct, nu_cSt, rho_liq,
                               n_min_ratio=0.5, n_max_ratio=1.2,
                               w_power=0.5, w_eta=0.3, w_gas=0.2,
-                              C_target_cm3N_L=0.0, p_suction_bar_abs=1.0, T_celsius=20.0, gas_medium="Luft"):
+                              C_target_cm3N_L=0.0, p_suction_bar_abs=1.0, T_celsius=20.0, gas_medium="Luft",
+                              allow_speed_adjustment=False):
     """
     Q ist nicht Eingabe: es werden Kandidaten-Q aus Kennlinien geprüft.
     """
@@ -780,7 +782,8 @@ def choose_best_mph_pump_autoQ(pumps, dp_req_bar, gvf_free_pct, nu_cSt, rho_liq,
                     nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
                     w_power=w_power, w_eta=w_eta, w_gas=w_gas,
                     C_target_cm3N_L=C_target_cm3N_L, p_suction_bar_abs=p_suction_bar_abs,
-                    T_celsius=T_celsius, gas_medium=gas_medium
+                    T_celsius=T_celsius, gas_medium=gas_medium,
+                    allow_speed_adjustment=allow_speed_adjustment
                 )
                 if cand is None:
                     continue
@@ -1165,7 +1168,8 @@ def run_multi_phase_pump():
                 C_target_cm3N_L=C_ziel,
                 p_suction_bar_abs=p_suction,
                 T_celsius=temperature,
-                gas_medium=gas_medium
+                gas_medium=gas_medium,
+                allow_speed_adjustment=False
             )
 
         # =========================
