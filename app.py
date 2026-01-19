@@ -1069,13 +1069,15 @@ def run_multi_phase_pump():
                 use_cziel_as_gvf = st.checkbox(
                     "GVF-Kennlinie aus C_ziel (Normvolumen-%)",
                     value=False,
-                    help="Wenn aktiv: C_ziel [Ncm³/L] wird physikalisch in GVF_s an der Saugseite umgerechnet."
+                    help="Wenn aktiv: C_ziel [Ncm³/L] wird physikalisch in GVF_s an der Saugseite umgerechnet. Kann mit GVF-Interpolation kombiniert werden."
                 )
                 use_interpolated_gvf = st.checkbox(
                     "GVF interpolieren (zwischen Kennlinien)",
                     value=True,
                     help="Wenn aktiv: GVF darf zwischen den Kurven liegen (z.B. 12,3%)."
                 )
+                if use_cziel_as_gvf and use_interpolated_gvf:
+                    st.caption("Kombi aktiv: GVF wird aus C_ziel berechnet und zwischen Kennlinien interpoliert.")
                 st.markdown("**Optimierung (gewichtete Kombination)**")
                 w_power = st.slider("Gewicht Energie (P)", 0.0, 1.0, 0.5, 0.05)
                 w_eta = st.slider("Gewicht Wirkungsgrad (η)", 0.0, 1.0, 0.3, 0.05)
