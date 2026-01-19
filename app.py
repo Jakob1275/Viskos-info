@@ -233,6 +233,22 @@ def safe_interp(x, xp, fp):
 def m3h_to_lmin(m3h):
     return float(m3h) * 1000.0 / 60.0
 
+def gas_flow_required_norm_lmin(Q_liq_m3h, C_target_cm3N_L):
+    """
+    Ziel-Gasmenge (Ncm³/L) -> Gasvolumenstrom bei Normbedingungen [L/min].
+    """
+    return float(Q_liq_m3h) * float(C_target_cm3N_L) / 60.0
+
+def oper_to_norm_ratio(p_bar_abs, T_celsius, gas):
+    T_K = float(T_celsius) + 273.15
+    Z = max(real_gas_factor(gas, p_bar_abs, T_celsius), 0.5)
+    return (float(p_bar_abs) / P_N_BAR) * (T_N_K / T_K) * (1.0 / Z)
+
+def gas_flow_oper_lmin_from_gvf(Q_liq_m3h, gvf_pct):
+    gvf_frac = safe_clamp(float(gvf_pct) / 100.0, 0.0, 0.99)
+    Q_gas_m3h = float(Q_liq_m3h) * (gvf_frac / max(1.0 - gvf_frac, 1e-9))
+    return m3h_to_lmin(Q_gas_m3h)
+
 def motor_iec(P_kW):
     steps = [0.12, 0.18, 0.25, 0.37, 0.55, 0.75, 1.1, 1.5, 2.2, 3.0, 4.0, 5.5,
              7.5, 11, 15, 18.5, 22, 30, 37, 45, 55, 75, 90, 110, 132, 160, 200]
@@ -623,7 +639,9 @@ def _P_at_Q_gvf(pump, Q_m3h, gvf_pct):
     return (1 - w) * P_lo + w * P_hi, lo, hi, w
 
 def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho_liq,
-                        n_min_ratio=0.5, n_max_ratio=1.2):
+                        n_min_ratio=0.5, n_max_ratio=1.2,
+                        w_power=0.5, w_eta=0.3, w_gas=0.2,
+                        C_target_cm3N_L=0.0, p_suction_bar_abs=1.0, T_celsius=20.0, gas_medium="Luft"):
     """
     Wählt beste Pumpe bei vorgegebenem Q und dp.
     Interpolation zwischen GVF-Kurven (auch 8/9/11% möglich).
@@ -691,14 +709,31 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                         "Q_m3h": Q_req,
                     })
 
+            ratio_norm = oper_to_norm_ratio(p_suction_bar_abs, T_celsius, gas_medium)
+            Q_gas_req_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_target_cm3N_L)
+
             for cand in candidates:
                 dp_surplus = max(0.0, cand["dp_avail"] - dp_req)
+
+                P_spec = cand["P_req"] / max(Q_req, 1e-6)
+                P_hyd_kW = (cand["dp_avail"] * BAR_TO_PA) * (Q_req / 3600.0) / 1000.0
+                eta_est = safe_clamp(P_hyd_kW / max(cand["P_req"], 1e-9), 0.0, 1.0)
+                eta_term = 1.0 - eta_est
+
+                Q_gas_oper_lmin = gas_flow_oper_lmin_from_gvf(Q_req, gvf_free_pct)
+                Q_gas_norm_lmin = Q_gas_oper_lmin * ratio_norm
+                gas_err = abs(Q_gas_norm_lmin - Q_gas_req_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6)
+
                 score = (
-                    1.00 * cand["P_req"] +
-                    0.20 * abs(cand["n_ratio"] - 1.0) +
-                    0.05 * dp_surplus
+                    float(w_power) * P_spec +
+                    float(w_eta) * eta_term +
+                    float(w_gas) * gas_err +
+                    0.05 * dp_surplus +
+                    0.10 * abs(cand["n_ratio"] - 1.0)
                 )
                 cand["score"] = score
+                cand["eta_est"] = eta_est
+                cand["gas_err"] = gas_err
                 if best is None or score < best["score"]:
                     best = cand
 
@@ -708,7 +743,9 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
     return best
 
 def choose_best_mph_pump_autoQ(pumps, dp_req_bar, gvf_free_pct, nu_cSt, rho_liq,
-                              n_min_ratio=0.5, n_max_ratio=1.2):
+                              n_min_ratio=0.5, n_max_ratio=1.2,
+                              w_power=0.5, w_eta=0.3, w_gas=0.2,
+                              C_target_cm3N_L=0.0, p_suction_bar_abs=1.0, T_celsius=20.0, gas_medium="Luft"):
     """
     Q ist nicht Eingabe: es werden Kandidaten-Q aus Kennlinien geprüft.
     """
@@ -733,7 +770,10 @@ def choose_best_mph_pump_autoQ(pumps, dp_req_bar, gvf_free_pct, nu_cSt, rho_liq,
             for Q_req in Q_candidates:
                 cand = choose_best_mph_pump(
                     [pump], Q_req_m3h=Q_req, dp_req_bar=dp_req, gvf_free_pct=gvf_free_pct,
-                    nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio
+                    nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
+                    w_power=w_power, w_eta=w_eta, w_gas=w_gas,
+                    C_target_cm3N_L=C_target_cm3N_L, p_suction_bar_abs=p_suction_bar_abs,
+                    T_celsius=T_celsius, gas_medium=gas_medium
                 )
                 if cand is None:
                     continue
@@ -1029,6 +1069,10 @@ def run_multi_phase_pump():
                     value=True,
                     help="Wenn aktiv: GVF darf zwischen den Kurven liegen (z.B. 12,3%)."
                 )
+                st.markdown("**Optimierung (gewichtete Kombination)**")
+                w_power = st.slider("Gewicht Energie (P)", 0.0, 1.0, 0.5, 0.05)
+                w_eta = st.slider("Gewicht Wirkungsgrad (η)", 0.0, 1.0, 0.3, 0.05)
+                w_gas = st.slider("Gewicht Luftmenge", 0.0, 1.0, 0.2, 0.05)
                 show_temp_band = st.checkbox("Temperaturband im Löslichkeitsdiagramm", value=True)
                 show_ref_targets = st.checkbox("Referenzlinien (50/100/150 Ncm³/L)", value=True)
 
@@ -1087,13 +1131,25 @@ def run_multi_phase_pump():
 
         # 3) Pumpenauswahl: Q automatisch
         best_pump = None
+        w_sum = max(float(w_power + w_eta + w_gas), 1e-9)
+        w_power_n = float(w_power) / w_sum
+        w_eta_n = float(w_eta) / w_sum
+        w_gas_n = float(w_gas) / w_sum
+
         if dp_req is not None:
             best_pump = choose_best_mph_pump_autoQ(
                 MPH_PUMPS,
                 dp_req_bar=dp_req,
                 gvf_free_pct=gvf_curve_pct,
                 nu_cSt=nu_liq,
-                rho_liq=rho_liq
+                rho_liq=rho_liq,
+                w_power=w_power_n,
+                w_eta=w_eta_n,
+                w_gas=w_gas_n,
+                C_target_cm3N_L=C_ziel,
+                p_suction_bar_abs=p_suction,
+                T_celsius=temperature,
+                gas_medium=gas_medium
             )
 
         # =========================
@@ -1136,6 +1192,10 @@ def run_multi_phase_pump():
                 st.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
             with p4:
                 st.metric("Drehzahl / Modus", f"{best_pump['n_rpm']:.0f} rpm | {best_pump['mode']}")
+            if "eta_est" in best_pump:
+                st.caption(
+                    f"Score‑Details: η_est={best_pump['eta_est']:.2f} | Gas‑Abweichung={best_pump['gas_err']*100:.1f}%"
+                )
         else:
             st.info("Keine geeignete Mehrphasenpumpe gefunden (oder p_req nicht bestimmbar).")
 
