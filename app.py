@@ -1325,7 +1325,7 @@ def run_multi_phase_pump():
         # Diagramme
         # =========================
         st.subheader("Diagramme")
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(24, 6))
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(32, 6))
 
         # --- Löslichkeit ---
         if gas_medium == "Luft":
@@ -1458,6 +1458,9 @@ def run_multi_phase_pump():
         # --- Solubility + Pump curve vs pressure ---
         c_sat_curve_p = None
         c_sat_curve_c = None
+        p_abs_curve = None
+        c_norm_curve = None
+        q_gas_lmin_curve = None
 
         if gas_medium == "Luft":
             if show_temp_band:
@@ -1538,6 +1541,9 @@ def run_multi_phase_pump():
                     (q_gas_lmin * oper_to_norm_ratio(p, temperature, gas_medium)) / max(Q_liq_lmin, 1e-12) * 1000.0
                     for q_gas_lmin, p in zip(Q_gas_lmin, p_abs)
                 ]
+                p_abs_curve = p_abs
+                c_norm_curve = C_norm_curve
+                q_gas_lmin_curve = Q_gas_lmin
                 ax3b.plot(p_abs, Q_gas_lmin, "-", linewidth=2.5, color="tab:red",
                           label=f"Pumpe (Gasstrom, GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
 
@@ -1594,6 +1600,80 @@ def run_multi_phase_pump():
         handles1, labels1 = ax3.get_legend_handles_labels()
         handles2, labels2 = ax3b.get_legend_handles_labels()
         ax3.legend(handles1 + handles2, labels1 + labels2, loc="best")
+
+        # --- Solubility + Pump curve (einheitlich Ncm³/L) ---
+        if gas_medium == "Luft":
+            if show_temp_band:
+                for T in [temperature - 10, temperature, temperature + 10]:
+                    if -10 <= T <= 150:
+                        p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
+                        ax4.plot(p_arr, sol_arr, "-", alpha=0.7,
+                                 label=f"Löslichkeit (Luft) @ {T:.0f}°C")
+            else:
+                p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
+                ax4.plot(p_arr, sol_arr, "-", label=f"Löslichkeit (Luft) @ {temperature:.0f}°C")
+
+            for g, y in AIR_COMPONENTS:
+                if show_temp_band:
+                    for T in [temperature - 10, temperature, temperature + 10]:
+                        if -10 <= T <= 150:
+                            p_arr, sol_arr = solubility_diagonal_curve(g, T, y_gas=y)
+                            ax4.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
+                else:
+                    p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
+                    ax4.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
+        else:
+            if show_temp_band:
+                for T in [temperature - 10, temperature, temperature + 10]:
+                    if -10 <= T <= 150:
+                        p_arr, sol_arr = solubility_diagonal_curve(gas_medium, T, y_gas=1.0)
+                        ax4.plot(p_arr, sol_arr, "--", alpha=0.7,
+                                 label=f"Löslichkeit ({gas_medium}) @ {T:.0f}°C")
+            else:
+                p_arr, sol_arr = solubility_diagonal_curve(gas_medium, temperature, y_gas=1.0)
+                ax4.plot(p_arr, sol_arr, "--", label=f"Löslichkeit ({gas_medium}) @ {temperature:.0f}°C")
+
+        ax4.axhline(C_ziel, linestyle=":", alpha=0.9, label="C_ziel")
+        ax4.text(13.8, C_ziel, "C_ziel", va="center", ha="right", fontsize=8)
+        if show_ref_targets:
+            for Cref in [50.0, 100.0, 150.0]:
+                ax4.axhline(Cref, linestyle=":", alpha=0.25)
+                ax4.text(13.8, Cref, f"{Cref:.0f} Ncm³/L", va="center", ha="right", fontsize=8)
+
+        if p_abs_curve and c_norm_curve:
+            ax4.plot(p_abs_curve, c_norm_curve, "-", linewidth=2.5, color="tab:red",
+                     label="Pumpe (Gasgehalt, Ncm³/L)")
+            p_op = p_suction + float(best_pump["dp_avail"]) if best_pump else None
+            if p_op is not None:
+                c_op = safe_interp(p_op, p_abs_curve, c_norm_curve)
+                ax4.scatter([p_op], [c_op], s=80, color="tab:red", marker="x", label="Betriebspunkt (C_op)")
+
+            if c_sat_curve_p and c_sat_curve_c:
+                c_sat_at_p = [safe_interp(p, c_sat_curve_p, c_sat_curve_c) for p in p_abs_curve]
+                hit = None
+                for i in range(len(p_abs_curve) - 1):
+                    d0 = c_norm_curve[i] - c_sat_at_p[i]
+                    d1 = c_norm_curve[i + 1] - c_sat_at_p[i + 1]
+                    if d0 == 0:
+                        hit = (p_abs_curve[i], c_norm_curve[i])
+                        break
+                    if d0 * d1 < 0:
+                        t = abs(d0) / (abs(d0) + abs(d1))
+                        p_hit = p_abs_curve[i] + (p_abs_curve[i + 1] - p_abs_curve[i]) * t
+                        c_hit = c_norm_curve[i] + (c_norm_curve[i + 1] - c_norm_curve[i]) * t
+                        hit = (p_hit, c_hit)
+                        break
+
+                if hit is not None:
+                    ax4.scatter([hit[0]], [hit[1]], s=120, marker="^", color="tab:green",
+                                label="Schnittpunkt (Sättigung)")
+
+        ax4.set_xlabel("Absolutdruck [bar]")
+        ax4.set_ylabel("Gasgehalt [Ncm³/L]")
+        ax4.set_title("Löslichkeit + Pumpenkennlinie (einheitlich Ncm³/L)")
+        ax4.grid(True)
+        ax4.set_xlim(0, 14)
+        ax4.legend()
 
         plt.tight_layout()
         st.pyplot(fig)
