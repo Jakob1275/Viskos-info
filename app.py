@@ -825,43 +825,66 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
 
             base_keys = sorted(pump["curves_dp_vs_Q"].keys())
             any_curve = pump["curves_dp_vs_Q"][base_keys[0]]
-            Q_candidates = list(map(float, any_curve["Q"]))
-            Q_candidates = [q for q in Q_candidates if q > 0]
+            Q_base = list(map(float, any_curve["Q"]))
+            Q_base = [q for q in Q_base if q > 0]
+            if not Q_base:
+                continue
 
-            for Q_req in Q_candidates:
-                req = _calc_requirements_for_Q(Q_req)
-                if req is None:
-                    continue
+            qmin = max(min(Q_base), 1e-6)
+            qmax = max(Q_base)
+            n_coarse = 80
+            Q_candidates = np.linspace(qmin, qmax, n_coarse)
 
-                if not use_interpolated_gvf:
-                    req["gvf_curve_pct"] = nearest_gvf_key(pump, req["gvf_s_pct_safe"])
+            def _scan_candidates(Q_list, best_local=None):
+                for Q_req in Q_list:
+                    req = _calc_requirements_for_Q(Q_req)
+                    if req is None:
+                        continue
 
-                if req["gvf_curve_pct"] > pump["GVF_max"] * 100.0:
-                    continue
+                    if not use_interpolated_gvf:
+                        req["gvf_curve_pct"] = nearest_gvf_key(pump, req["gvf_s_pct_safe"])
 
-                cand = choose_best_mph_pump(
-                    [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=req["gvf_curve_pct"],
-                    nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
-                    w_power=w_power, w_eta=w_eta, w_gas=w_gas,
-                    C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
-                    T_celsius=T_celsius, gas_medium=gas_medium,
-                    allow_speed_adjustment=allow_speed_adjustment
-                )
-                if cand is None:
-                    continue
+                    if req["gvf_curve_pct"] > pump["GVF_max"] * 100.0:
+                        continue
 
-                cand.update(req)
+                    cand = choose_best_mph_pump(
+                        [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=req["gvf_curve_pct"],
+                        nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
+                        w_power=w_power, w_eta=w_eta, w_gas=w_gas,
+                        C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
+                        T_celsius=T_celsius, gas_medium=gas_medium,
+                        allow_speed_adjustment=allow_speed_adjustment
+                    )
+                    if cand is None:
+                        continue
 
-                q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
-                edge_penalty = 0.0
-                if q_rel < 0.2 or q_rel > 0.9:
-                    edge_penalty = 0.8
+                    cand.update(req)
 
-                cand_score = cand["score"] + edge_penalty
-                cand["score2"] = cand_score
+                    q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
+                    edge_penalty = 0.0
+                    if q_rel < 0.2 or q_rel > 0.9:
+                        edge_penalty = 0.8
 
-                if best is None or cand_score < best["score2"]:
-                    best = cand
+                    cand_score = cand["score"] + edge_penalty
+                    cand["score2"] = cand_score
+
+                    if best_local is None or cand_score < best_local["score2"]:
+                        best_local = cand
+                return best_local
+
+            best_local = _scan_candidates(Q_candidates)
+
+            if best_local is not None:
+                step = (qmax - qmin) / max(n_coarse - 1, 1)
+                q_center = float(best_local["Q_m3h"])
+                q_ref_min = max(qmin, q_center - 2.0 * step)
+                q_ref_max = min(qmax, q_center + 2.0 * step)
+                if q_ref_max > q_ref_min:
+                    Q_refined = np.linspace(q_ref_min, q_ref_max, 60)
+                    best_local = _scan_candidates(Q_refined, best_local)
+
+            if best_local is not None and (best is None or best_local["score2"] < best["score2"]):
+                best = best_local
 
         except Exception:
             continue
