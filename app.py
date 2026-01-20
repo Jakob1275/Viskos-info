@@ -926,13 +926,17 @@ def run_single_phase_pump():
 
         # --- Q-H ---
         ax1.plot(pump["Qw"], pump["Hw"], "o-", label="Wasser (n0)")
-        ax1.plot(Q_vis_curve, H_vis_curve, "s--", label="Viskos (n0)")
+        q_vis_plot = [q for q in Q_vis_curve if q > 0]
+        h_vis_plot = [h for q, h in zip(Q_vis_curve, H_vis_curve) if q > 0]
+        eta_vis_plot = [e for q, e in zip(Q_vis_curve, eta_vis_curve) if q > 0]
+        p_vis_plot = [p for q, p in zip(Q_vis_curve, P_vis_curve) if q > 0]
+        ax1.plot(q_vis_plot, h_vis_plot, "s--", label="Viskos (n0)")
         if n_ratio_opt is not None:
             Q_scaled = [q * n_ratio_opt for q in pump["Qw"]]
             H_scaled = [h * (n_ratio_opt ** 2) for h in pump["Hw"]]
             ax1.plot(Q_scaled, H_scaled, ":", label=f"Wasser (n≈{n_opt_rpm:.0f} rpm)")
-            Q_vis_scaled = [q * n_ratio_opt for q in Q_vis_curve]
-            H_vis_scaled = [h * (n_ratio_opt ** 2) for h in H_vis_curve]
+            Q_vis_scaled = [q * n_ratio_opt for q in q_vis_plot]
+            H_vis_scaled = [h * (n_ratio_opt ** 2) for h in h_vis_plot]
             ax1.plot(Q_vis_scaled, H_vis_scaled, "-.", label=f"Viskos (n≈{n_opt_rpm:.0f} rpm)")
         ax1.scatter([Q_vis_req], [H_vis_req], marker="x", s=90, label="BP (viskos)")
         ax1.scatter([Q_water], [best["H_at"]], marker="^", s=90, label="BP (Wasser-Äquiv.)")
@@ -944,7 +948,7 @@ def run_single_phase_pump():
 
         # --- Q-η ---
         ax2.plot(pump["Qw"], pump["eta"], "o-", label="Wasser (n0)")
-        ax2.plot(Q_vis_curve, eta_vis_curve, "s--", label="Viskos (n0)")
+        ax2.plot(q_vis_plot, eta_vis_plot, "s--", label="Viskos (n0)")
         ax2.scatter([Q_vis_req], [eta_vis], marker="x", s=90, label="η (viskos)")
         ax2.set_xlabel("Q [m³/h]")
         ax2.set_ylabel("η [-]")
@@ -955,12 +959,12 @@ def run_single_phase_pump():
         # --- Q-P (konsistent!) ---
         method_label = "aus H & η" if use_consistent_power else "Pw Referenz"
         ax3.plot(Q_water_curve, P_water_curve, "o-", label=f"Wasser ({method_label})")
-        ax3.plot(Q_vis_curve, P_vis_curve, "s--", label=f"Viskos ({method_label})")
+        ax3.plot(q_vis_plot, p_vis_plot, "s--", label=f"Viskos ({method_label})")
 
         if n_ratio_opt is not None:
             # Affinität: P ~ n^3, Q ~ n
-            P_scaled = [p * (n_ratio_opt ** 3) for p in P_vis_curve]
-            Q_scaled = [q * n_ratio_opt for q in Q_vis_curve]
+            P_scaled = [p * (n_ratio_opt ** 3) for p in p_vis_plot]
+            Q_scaled = [q * n_ratio_opt for q in q_vis_plot]
             ax3.plot(Q_scaled, P_scaled, ":", label=f"Viskos (n≈{n_opt_rpm:.0f} rpm)")
 
         ax3.scatter([Q_vis_req], [P_vis_kW], marker="x", s=90, label="BP (viskos)")
@@ -978,6 +982,7 @@ def run_single_phase_pump():
         with st.expander("Detaillierter Rechenweg"):
             st.markdown("### 0) Überblick")
             st.markdown("Ziel: Aus dem viskosen Betriebspunkt auf den äquivalenten Wasserpunkt zurückrechnen, Pumpe auswählen und Leistung bestimmen.")
+            st.markdown("**Einheiten:** $Q$ in m³/h, $H$ in m, $\nu$ in cSt, $\rho$ in kg/m³.")
 
             st.markdown("---")
             st.markdown("### 1) Eingabedaten")
@@ -993,11 +998,13 @@ def run_single_phase_pump():
             Q_gpm_calc = Q_vis_req * 4.40287
             H_ft_calc = H_vis_req * 3.28084
             st.markdown(f"- Berechnet: **Q_gpm = {Q_gpm_calc:.2f}**, **H_ft = {H_ft_calc:.2f}**")
+            st.caption("Umrechnung nötig, weil die HI‑Korrelation mit gpm/ft parametrisiert ist.")
 
             st.markdown("---")
             st.markdown("### 3) HI‑Viskositätsparameter $B$")
             st.latex(r"B = 16.5 \cdot \frac{\sqrt{\nu}}{Q_{gpm}^{0.25}\cdot H_{ft}^{0.375}}")
             st.markdown(f"- Ergebnis: **B = {B:.3f}**")
+            st.caption("$B$ steuert die Korrekturfaktoren für Förderhöhe und Wirkungsgrad.")
 
             st.info("Wasser‑Guard aktiv: Für ν≈1 cSt wird CH=Cη=1 gesetzt." if is_effectively_water(nu) else "HI‑Korrektur aktiv (ν > ~1.15 cSt).")
 
@@ -1007,12 +1014,14 @@ def run_single_phase_pump():
             st.latex(r"C_\eta = 1 - 0.25\log_{10}(B) - 0.05(\log_{10}(B))^2")
             st.markdown(f"- **C_H = {CH:.3f}**, **C_η = {Ceta:.3f}**")
             st.markdown("- Hinweis: $C_H<1$ bedeutet geringere Förderhöhe bei höherer Viskosität.")
+            st.caption("Wasser‑Guard: Bei $\nu\approx 1$ cSt wird $C_H=C_\eta=1$ gesetzt.")
 
             st.markdown("---")
             st.markdown("### 5) Rückrechnung auf Wasser‑Äquivalent")
             st.latex(r"H_{vis} = H_{water}\cdot C_H \Rightarrow H_{water} = \frac{H_{vis}}{C_H}")
             st.latex(r"Q_w \approx Q_{vis} \; (C_Q \approx 1)")
             st.markdown(f"- Ergebnis: **Q_w = {Q_water:.2f} m³/h**, **H_w = {H_water:.2f} m**")
+            st.caption("Die Pumpenkennlinien sind für Wasser angegeben, daher die Rückrechnung.")
 
             st.markdown("---")
             st.markdown("### 6) Wirkungsgrad und Wellenleistung (viskos)")
@@ -1021,6 +1030,7 @@ def run_single_phase_pump():
             st.markdown(f"- \(\eta_{{vis}} = {eta_vis:.3f}\)")
             st.markdown(f"- \(P_{{hyd}} = {P_hyd_W:.0f}\,W\) → **P_welle = {P_vis_kW:.2f} kW**")
             st.markdown(f"- Motorreserve {reserve_pct}% → **IEC = {P_motor_kW:.2f} kW**")
+            st.caption("$P_{hyd}$ ist die hydraulische Leistung; die Wellenleistung berücksichtigt den Wirkungsgrad.")
 
             st.markdown("---")
             st.markdown("### 7) Drehzahlvariation (Affinitätsgesetze)")
@@ -1031,6 +1041,7 @@ def run_single_phase_pump():
                 st.markdown(f"- **P_opt = {P_opt_kW:.2f} kW**, Einsparung **{saving_pct:.1f}%**")
             else:
                 st.markdown("- Keine gültige optimale Drehzahl im Bereich gefunden.")
+            st.caption("Affinitätsgesetze gelten idealisiert für geometrisch ähnliche Strömung.")
 
     except Exception as e:
         show_error(e, "Einphasenpumpen")
@@ -1390,6 +1401,8 @@ def run_multi_phase_pump():
             max_H = 0.0
 
             for gvf_key in sorted(pump["curves_dp_vs_Q"].keys()):
+                if gvf_key > 30:
+                    continue
                 curve = pump["curves_dp_vs_Q"][gvf_key]
                 Q_lmin = [m3h_to_lmin(q) for q in curve["Q"]]
                 H_m = [dp * BAR_TO_M_LIQ for dp in curve["dp"]]
@@ -1397,7 +1410,7 @@ def run_multi_phase_pump():
                 max_H = max(max_H, max(H_m))
                 ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"{gvf_key}% GVF")
 
-            if use_interpolated_gvf:
+            if use_interpolated_gvf and gvf_sel <= 30:
                 # Interpolierte GVF-Kurve (BP liegt exakt darauf)
                 base_keys = sorted(pump["curves_dp_vs_Q"].keys())
                 base_curve = pump["curves_dp_vs_Q"][base_keys[0]]
@@ -1412,7 +1425,7 @@ def run_multi_phase_pump():
                     linewidth=2.5,
                     label=f"GVF≈{gvf_sel:.1f}% (interpoliert, n={n_ratio_sel:.2f}·n0)"
                 )
-            else:
+            elif not use_interpolated_gvf and gvf_sel <= 30:
                 # Ausgewählte diskrete GVF-Kurve (BP liegt exakt darauf)
                 sel_curve = pump["curves_dp_vs_Q"].get(gvf_sel)
                 if sel_curve:
@@ -1478,6 +1491,9 @@ def run_multi_phase_pump():
         ax3.grid(True)
         ax3.set_xlim(0, 14)
 
+        if p_req is not None:
+            ax3.scatter([p_req], [C_ziel], s=110, marker="^", color="tab:green", label="Zielpunkt (p_req, C_ziel)")
+
         if best_pump and dp_req is not None:
             pump = best_pump["pump"]
             Q_sel = float(best_pump["Q_m3h"])
@@ -1495,7 +1511,7 @@ def run_multi_phase_pump():
                 Q_curve = list(map(float, sel_curve["Q"])) if sel_curve else []
                 dp_curve = list(map(float, sel_curve["dp"])) if sel_curve else []
 
-            if Q_curve and dp_curve:
+            if Q_curve and dp_curve and gvf_plot <= 30:
                 Q_curve_scaled = [q * n_ratio_sel for q in Q_curve]
                 dp_curve_scaled = [dp * (n_ratio_sel ** 2) for dp in dp_curve]
                 p_abs = [p_suction + dp for dp in dp_curve_scaled]
@@ -1528,6 +1544,7 @@ def run_multi_phase_pump():
                 "GVF_s an der Saugseite ableiten, eine passende GVF‑Kennlinie wählen und anschließend "
                 "die energetisch optimale Pumpe (gewichtete Kombination) bestimmen."
             )
+            st.markdown("**Hinweis:** Löslichkeit basiert auf vereinfachtem Henry‑Modell mit $Z$‑Näherung.")
 
             st.markdown("---")
             st.markdown("### 1) Eingaben & Basisgrößen")
@@ -1536,6 +1553,7 @@ def run_multi_phase_pump():
             st.markdown(f"- **Gas:** {gas_medium} | **Medium:** {liquid_medium} | **T:** {temperature:.1f} °C")
             st.markdown(f"- **Sicherheitsfaktor GVF_s:** {safety_factor:.0f}%")
             st.markdown(f"- **Umrechnung bar→m:** \(H=\\Delta p/(\\rho g)\) ⇒ 1 bar = {BAR_TO_M_LIQ:.2f} m (bei ρ={rho_liq:.0f} kg/m³)")
+            st.caption("Alle Drücke sind Absolutdrücke.")
 
             st.markdown("---")
             st.markdown("### 2) Löslichkeit & Zielbedingung")
@@ -1553,6 +1571,7 @@ def run_multi_phase_pump():
                 st.warning("p_req konnte im Bereich 0.2…200 bar nicht gefunden werden (Ziel zu hoch im Modell).")
             else:
                 st.markdown(f"- Ergebnis: **p_req = {p_req:.2f} bar(abs)**")
+            st.caption("$p_{req}$ ist der Druck, bei dem das Zielgas vollständig löslich wäre.")
 
             st.markdown("---")
             st.markdown("### 3) Druckhub & Förderhöhe")
@@ -1561,6 +1580,7 @@ def run_multi_phase_pump():
             else:
                 st.latex(r"\Delta p = p_{req}-p_s \quad;\quad H_{req}=\frac{\Delta p\cdot 10^5}{\rho g}")
                 st.markdown(f"- Δp = {dp_req:.3f} bar → **H_req = {H_req_m:.2f} m**")
+            st.caption("Die Förderhöhe wird physikalisch mit der Flüssigkeitsdichte berechnet.")
 
             st.markdown("---")
             st.markdown("### 4) Freies Gas an der Saugseite → GVF_s")
@@ -1568,6 +1588,7 @@ def run_multi_phase_pump():
             st.markdown(f"- @p_s: gelöst = {dissolved_s:.1f} Ncm³/L, frei = {free_s:.1f} Ncm³/L")
             st.latex(r"GVF_s=\frac{V_{gas,op}}{1+V_{gas,op}}\cdot 100\%")
             st.markdown(f"- GVF_s = {gvf_s_pct:.2f}% → mit Sicherheit: **{gvf_s_pct_safe:.2f}%**")
+            st.caption("Nur freies Gas trägt zur GVF bei; gelöstes Gas nicht.")
 
             st.markdown("---")
             st.markdown("### 5) GVF‑Kennlinie & Gasgehalt am Betriebspunkt")
@@ -1583,6 +1604,7 @@ def run_multi_phase_pump():
                 st.markdown(f"- Gelöst (Druckseite, möglich): **{sat_d:.1f} Ncm³/L**")
                 st.markdown(f"- Gelöst (Druckseite, vorhanden): **{dissolved_d:.1f} Ncm³/L**")
                 st.markdown(f"- Freies Gas (Druckseite, aus Löslichkeit): **{free_d:.1f} Ncm³/L**")
+            st.caption("‘Möglich’ entspricht $C_{sat}$, ‘vorhanden’ ist durch $C_{ziel}$ begrenzt.")
 
             st.markdown("---")
             st.markdown("### 6) Pumpenauswahl & Affinitätsgesetze")
@@ -1600,6 +1622,7 @@ def run_multi_phase_pump():
                     st.markdown(f"- Vergleich: Δp_req={dp_req:.2f} bar ↔ Δp_avail={best_pump['dp_avail']:.2f} bar")
             else:
                 st.markdown("- Keine geeignete Pumpe im Datensatz gefunden (oder p_req nicht bestimmbar).")
+            st.caption("Die Auswahl minimiert eine gewichtete Zielfunktion; Δp‑Abweichung wird mitbestraft.")
 
             st.markdown("---")
             st.markdown("### 7) Optimierungsziel (gewichtete Kombination)")
@@ -1609,6 +1632,7 @@ def run_multi_phase_pump():
                 "Drehzahlabweichung."
             )
             st.latex(r"\text{Score}=w_P\cdot P_{spec} + w_\eta\cdot(1-\eta_{est}) + w_g\cdot\varepsilon_{gas}")
+            st.caption("$P_{spec}$ ist die spezifische Leistung, $\varepsilon_{gas}$ die Abweichung zur Ziel‑Gasmenge.")
 
     except Exception as e:
         show_error(e, "Mehrphasenpumpen")
@@ -1677,11 +1701,13 @@ def run_atex_selection():
             st.markdown(f"- **Atmosphäre / Zone:** {atmosphere} / Zone {zone}")
             st.markdown(f"- **Temperaturabstand ΔT:** {t_margin:.0f} K")
             st.markdown(f"- **Leistungsaufschlag:** {reserve_factor:.2f} (-)")
+            st.caption("ATEX‑Auswahl basiert auf Zone und Temperaturklasse.")
 
             st.markdown("### 2) Leistungsanforderung (Motorgröße)")
             st.latex(r"P_{motor,min}=f_{res}\cdot P_{welle}")
             st.markdown(f"- \(P_{{motor,min}} = {reserve_factor:.2f}\cdot {P_req:.2f} = {P_motor_min:.2f}\,kW\)")
             st.markdown(f"- **IEC-Stufe (nächstgrößer):** {P_iec:.2f} kW")
+            st.caption("IEC‑Stufe ist die nächsthöhere Normleistung.")
 
             st.markdown("### 3) ATEX-Zulässigkeit (Zone)")
             st.markdown("- Filter: nur Motoren mit Freigabe für die gewählte Zone.")
@@ -1696,6 +1722,7 @@ def run_atex_selection():
                 f"- Ergebnis: **{selected['t_max_surface']:.0f}°C** (Motor) \u2192 Abstand = "
                 f"**{selected['t_max_surface'] - T_medium:.1f} K**"
             )
+            st.caption("So wird sichergestellt, dass die Oberfläche die Temperaturklasse einhält.")
 
             st.markdown("### 5) Auswahl")
             st.markdown(f"- **Kennzeichnung:** {selected['marking']}")
