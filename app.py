@@ -1456,46 +1456,39 @@ def run_multi_phase_pump():
             ax2.grid(True)
 
         # --- Solubility + Pump curve vs pressure ---
-        q_sat_curve_p = None
-        q_sat_curve_q = None
+        c_sat_curve_p = None
+        c_sat_curve_c = None
 
-        if best_pump and dp_req is not None:
-            Q_sel = float(best_pump["Q_m3h"])
-            p_arr = np.linspace(0.2, 14.0, 140)
-
-            def _csol(p, T):
-                if gas_medium == "Luft":
-                    return gas_solubility_cm3N_per_L("Luft", p, T, y_gas=1.0)
-                return gas_solubility_cm3N_per_L(gas_medium, p, T, y_gas=1.0)
-
+        if gas_medium == "Luft":
             if show_temp_band:
                 for T in [temperature - 10, temperature, temperature + 10]:
                     if -10 <= T <= 150:
-                        sol_arr = [_csol(p, T) for p in p_arr]
-                        q_norm = [gas_flow_required_norm_lmin(Q_sel, c) for c in sol_arr]
-                        q_oper = [q / max(oper_to_norm_ratio(p, T, gas_medium), 1e-12) for q, p in zip(q_norm, p_arr)]
-                        ax3.plot(p_arr, q_oper, "--", alpha=0.7, color="tab:green",
-                                 label=f"Löslichkeit (max. Gasstrom) @ {T:.0f}°C")
+                        p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
+                        ax3.plot(p_arr, sol_arr, "-", alpha=0.7, color="tab:green",
+                                 label=f"Löslichkeit (Luft) @ {T:.0f}°C")
             else:
-                sol_arr = [_csol(p, temperature) for p in p_arr]
-                q_norm = [gas_flow_required_norm_lmin(Q_sel, c) for c in sol_arr]
-                q_oper = [q / max(oper_to_norm_ratio(p, temperature, gas_medium), 1e-12) for q, p in zip(q_norm, p_arr)]
-                ax3.plot(p_arr, q_oper, "--", color="tab:green",
-                         label=f"Löslichkeit (max. Gasstrom) @ {temperature:.0f}°C")
-
-                q_sat_curve_p = p_arr.tolist()
-                q_sat_curve_q = q_oper
-        else:
-            if gas_medium == "Luft":
                 p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
-                ax3.plot(p_arr, sol_arr, "-", label=f"Luft (Gemisch) @ {temperature:.0f}°C")
+                ax3.plot(p_arr, sol_arr, "-", color="tab:green",
+                         label=f"Löslichkeit (Luft) @ {temperature:.0f}°C")
+                c_sat_curve_p = p_arr.tolist()
+                c_sat_curve_c = sol_arr.tolist()
+        else:
+            if show_temp_band:
+                for T in [temperature - 10, temperature, temperature + 10]:
+                    if -10 <= T <= 150:
+                        p_arr, sol_arr = solubility_diagonal_curve(gas_medium, T, y_gas=1.0)
+                        ax3.plot(p_arr, sol_arr, "--", alpha=0.7, color="tab:green",
+                                 label=f"Löslichkeit ({gas_medium}) @ {T:.0f}°C")
             else:
                 p_arr, sol_arr = solubility_diagonal_curve(gas_medium, temperature, y_gas=1.0)
-                ax3.plot(p_arr, sol_arr, "--", label=f"{gas_medium} @ {temperature:.0f}°C")
+                ax3.plot(p_arr, sol_arr, "--", color="tab:green",
+                         label=f"Löslichkeit ({gas_medium}) @ {temperature:.0f}°C")
+                c_sat_curve_p = p_arr.tolist()
+                c_sat_curve_c = sol_arr.tolist()
 
         ax3.set_xlabel("Absolutdruck [bar]")
-        ax3.set_ylabel("Gasvolumenstrom [L/min]")
-        ax3.set_title("Löslichkeit (als Gasstrom) + Pumpenkennlinie")
+        ax3.set_ylabel("Gasgehalt [Ncm³/L]")
+        ax3.set_title("Löslichkeit + Pumpenkennlinie (gemeinsame y‑Achse)")
         ax3.grid(True)
         ax3.set_xlim(0, 14)
 
@@ -1522,33 +1515,43 @@ def run_multi_phase_pump():
                 p_abs = [p_suction + dp for dp in dp_curve_scaled]
                 Q_gas_m3h = [q * (gvf_frac / (1.0 - gvf_frac)) for q in Q_curve_scaled]
                 Q_gas_lmin = [m3h_to_lmin(qg) for qg in Q_gas_m3h]
-                ax3.plot(p_abs, Q_gas_lmin, "-", linewidth=2.5, color="tab:red",
-                         label=f"Gasvolumenstrom (GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
+                Q_liq_lmin = m3h_to_lmin(Q_sel)
+                C_norm_curve = [
+                    (q_gas_lmin * oper_to_norm_ratio(p, temperature, gas_medium)) / max(Q_liq_lmin, 1e-12) * 1000.0
+                    for q_gas_lmin, p in zip(Q_gas_lmin, p_abs)
+                ]
+                ax3.plot(p_abs, C_norm_curve, "-", linewidth=2.5, color="tab:red",
+                         label=f"Pumpe (Gasgehalt, GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
 
+                C_op = (
+                    (m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))))
+                    * oper_to_norm_ratio(p_suction + best_pump["dp_avail"], temperature, gas_medium)
+                    / max(Q_liq_lmin, 1e-12) * 1000.0
+                )
                 ax3.scatter(
                     [p_suction + best_pump["dp_avail"]],
-                    [m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac)))],
+                    [C_op],
                     s=80,
                     color="tab:red",
                     marker="x",
-                    label="Betriebspunkt (Gas)"
+                    label="Betriebspunkt (Gasgehalt)"
                 )
 
-                # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (als Gasstrom)
-                if q_sat_curve_p and q_sat_curve_q:
-                    q_sat_at_p = [safe_interp(p, q_sat_curve_p, q_sat_curve_q) for p in p_abs]
+                # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (Ncm³/L)
+                if c_sat_curve_p and c_sat_curve_c:
+                    c_sat_at_p = [safe_interp(p, c_sat_curve_p, c_sat_curve_c) for p in p_abs]
                     hit = None
                     for i in range(len(p_abs) - 1):
-                        d0 = Q_gas_lmin[i] - q_sat_at_p[i]
-                        d1 = Q_gas_lmin[i + 1] - q_sat_at_p[i + 1]
+                        d0 = C_norm_curve[i] - c_sat_at_p[i]
+                        d1 = C_norm_curve[i + 1] - c_sat_at_p[i + 1]
                         if d0 == 0:
-                            hit = (p_abs[i], Q_gas_lmin[i])
+                            hit = (p_abs[i], C_norm_curve[i])
                             break
                         if d0 * d1 < 0:
                             t = abs(d0) / (abs(d0) + abs(d1))
                             p_hit = p_abs[i] + (p_abs[i + 1] - p_abs[i]) * t
-                            q_hit = Q_gas_lmin[i] + (Q_gas_lmin[i + 1] - Q_gas_lmin[i]) * t
-                            hit = (p_hit, q_hit)
+                            c_hit = C_norm_curve[i] + (C_norm_curve[i + 1] - C_norm_curve[i]) * t
+                            hit = (p_hit, c_hit)
                             break
 
                     if hit is not None:
@@ -1827,3 +1830,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
