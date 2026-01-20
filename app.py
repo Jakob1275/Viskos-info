@@ -1135,19 +1135,9 @@ def run_multi_phase_pump():
 
             with c3:
                 st.subheader("Optionen")
-                safety_factor = st.slider("Sicherheitsfaktor auf GVF_s [%]", 0, 20, 10)
-                use_cziel_as_gvf = st.checkbox(
-                    "GVF-Kennlinie aus C_ziel (Gasstrom, alles frei)",
-                    value=False,
-                    help="Wenn aktiv: Der erforderliche Gasstrom C_ziel [L/min] wird in einen operativen Gasstrom umgerechnet und direkt in eine GVF_s-Kennlinie überführt (ohne Löslichkeitsabzug). Kann mit GVF-Interpolation kombiniert werden."
-                )
-                use_interpolated_gvf = st.checkbox(
-                    "GVF interpolieren (zwischen Kennlinien)",
-                    value=True,
-                    help="Wenn aktiv: GVF darf zwischen den Kurven liegen (z.B. 12,3%)."
-                )
-                if use_cziel_as_gvf and use_interpolated_gvf:
-                    st.caption("Kombi aktiv: GVF wird aus C_ziel berechnet und zwischen Kennlinien interpoliert.")
+                safety_factor = 0.0
+                use_cziel_as_gvf = False
+                use_interpolated_gvf = True
                 st.markdown("**Optimierung (gewichtete Kombination)**")
                 w_power = st.slider("Gewicht Energie (P)", 0.0, 1.0, 0.5, 0.05)
                 w_eta = st.slider("Gewicht Wirkungsgrad (η)", 0.0, 1.0, 0.3, 0.05)
@@ -1244,7 +1234,7 @@ def run_multi_phase_pump():
         # =========================
         st.subheader("Ergebnisse")
 
-        r1, r2, r3, r4 = st.columns(4)
+        r1, r2, r3 = st.columns(3)
         with r1:
             st.metric("Saugdruck (fix, Unterdruck)", f"{p_suction:.2f} bar(abs)")
             st.caption("Fix gesetzt, damit Luft eingesogen werden kann.")
@@ -1256,9 +1246,6 @@ def run_multi_phase_pump():
                 st.metric("Gelöst @ p_s [L/min]", f"{cm3N_L_to_lmin(dissolved_s, Q_sel):.2f}")
                 st.metric("Frei @ p_s [L/min]", f"{cm3N_L_to_lmin(free_s, Q_sel):.2f}")
         with r3:
-            st.metric("GVF_s (frei)", f"{gvf_s_pct:.2f}%")
-            st.metric("GVF_s (+Sicherheit)", f"{gvf_s_pct_safe:.2f}%")
-        with r4:
             if p_req is None:
                 st.warning("p_req nicht erreichbar (0.2…200 bar) – Ziel zu hoch im Modell.")
             else:
@@ -1268,12 +1255,7 @@ def run_multi_phase_pump():
         if best_pump and dp_req is not None:
             p_discharge = p_suction + float(best_pump["dp_avail"])
             dissolved_d, free_d, sat_d = dissolved_free_at_pressure(p_discharge, C_target_cm3N_L, targets)
-            gvf_src = "aus C_ziel" if use_cziel_as_gvf else "physikalisch"
-            gvf_display = f"{gvf_curve_pct:.1f}%" if use_interpolated_gvf else f"{gvf_curve_pct:.0f}%"
-            gvf_mode = "interpoliert" if use_interpolated_gvf else "diskret"
-            st.success(
-                f"✅ Empfohlene Pumpe: {best_pump['pump']['id']}  |  GVF-Kennlinie {gvf_display} ({gvf_mode}, {gvf_src})"
-            )
+            st.success(f"✅ Empfohlene Pumpe: {best_pump['pump']['id']}")
             Q_req_sel = float(best_pump["Q_m3h"])
             p1, p2, p3, p4 = st.columns(4)
             with p1:
@@ -1448,7 +1430,7 @@ def run_multi_phase_pump():
             max_Q_lmin = 0.0
             max_H = 0.0
 
-            for gvf_key in sorted(pump["curves_dp_vs_Q"].keys()):
+            for i, gvf_key in enumerate(sorted(pump["curves_dp_vs_Q"].keys()), start=1):
                 if gvf_key > 30:
                     continue
                 curve = pump["curves_dp_vs_Q"][gvf_key]
@@ -1456,7 +1438,7 @@ def run_multi_phase_pump():
                 H_m = [dp * BAR_TO_M_LIQ for dp in curve["dp"]]
                 max_Q_lmin = max(max_Q_lmin, max(Q_lmin))
                 max_H = max(max_H, max(H_m))
-                ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"{gvf_key}% GVF")
+                ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"Kennlinie {i}")
 
             if use_interpolated_gvf and gvf_sel <= 30:
                 # Interpolierte GVF-Kurve (BP liegt exakt darauf)
@@ -1471,7 +1453,7 @@ def run_multi_phase_pump():
                     H_interp,
                     "-",
                     linewidth=2.5,
-                    label=f"GVF≈{gvf_sel:.1f}% (interpoliert, n={n_ratio_sel:.2f}·n0)"
+                    label=f"Betriebskurve (interpoliert, n={n_ratio_sel:.2f}·n0)"
                 )
             elif not use_interpolated_gvf and gvf_sel <= 30:
                 # Ausgewählte diskrete GVF-Kurve (BP liegt exakt darauf)
@@ -1484,7 +1466,7 @@ def run_multi_phase_pump():
                         H_sel_curve,
                         "-",
                         linewidth=2.5,
-                        label=f"GVF {gvf_sel:.0f}% (ausgewählt, n={n_ratio_sel:.2f}·n0)"
+                        label=f"Betriebskurve (ausgewählt, n={n_ratio_sel:.2f}·n0)"
                     )
 
             ax2.scatter(Q_lmin_sel, H_avail_plot, s=110, marker="x", label="Betriebspunkt (auf Kennlinie)")
@@ -1609,7 +1591,7 @@ def run_multi_phase_pump():
                 c_norm_curve = C_norm_curve
                 q_gas_lmin_curve = Q_gas_lmin
                 ax3.plot(p_abs, Q_gas_lmin, "-", linewidth=2.5, color="tab:red",
-                         label=f"Pumpe (Gasstrom, GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
+                         label=f"Pumpe (Gasstrom, n={n_ratio_sel:.2f}·n0)")
 
                 C_op = (
                     (m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))))
@@ -1681,7 +1663,6 @@ def run_multi_phase_pump():
                     f"- Umrechnung: **C_ziel** → **{C_target_cm3N_L:.1f} Ncm³/L** bei Q={Q_liq_lmin:.1f} L/min"
                 )
             st.markdown(f"- **Gas:** {gas_medium} | **Medium:** {liquid_medium} | **T:** {temperature:.1f} °C")
-            st.markdown(f"- **Sicherheitsfaktor GVF_s:** {safety_factor:.0f}%")
             st.markdown(f"- **Umrechnung bar→m:** \(H=\\Delta p/(\\rho g)\) ⇒ 1 bar = {BAR_TO_M_LIQ:.2f} m (bei ρ={rho_liq:.0f} kg/m³)")
             st.caption("Alle Drücke sind Absolutdrücke.")
 
@@ -1715,23 +1696,15 @@ def run_multi_phase_pump():
             st.caption("Die Förderhöhe wird physikalisch mit der Flüssigkeitsdichte berechnet.")
 
             st.markdown("---")
-            st.markdown("### 4) Freies Gas an der Saugseite → GVF_s")
+            st.markdown("### 4) Freies Gas an der Saugseite")
             st.latex(r"C_{free,s}=\max(0, C_{ziel}-C_{sat}(p_s,T)) \quad(\text{bzw. Summe über Komponenten})")
             if C_target_cm3N_L > 0:
                 st.markdown(f"- Umgerechnet: **C_ziel = {C_target_cm3N_L:.1f} Ncm³/L**")
             st.markdown(f"- @p_s: gelöst = {dissolved_s:.1f} Ncm³/L, frei = {free_s:.1f} Ncm³/L")
-            st.latex(r"GVF_s=\frac{V_{gas,op}}{1+V_{gas,op}}\cdot 100\%")
-            st.markdown(f"- GVF_s = {gvf_s_pct:.2f}% → mit Sicherheit: **{gvf_s_pct_safe:.2f}%**")
-            st.caption("Nur freies Gas trägt zur GVF bei; gelöstes Gas nicht.")
+            st.caption("Nur freies Gas wird als Gasphase betrachtet; gelöstes Gas nicht.")
 
             st.markdown("---")
-            st.markdown("### 5) GVF‑Kennlinie & Gasgehalt am Betriebspunkt")
-            gvf_src = "aus C_ziel" if use_cziel_as_gvf else "physikalisch (GVF_s)"
-            gvf_mode = "interpoliert" if use_interpolated_gvf else "diskret"
-            st.markdown(
-                f"- Quelle: **{gvf_src}**, Modus: **{gvf_mode}** → GVF‑Kennlinie = **{gvf_curve_pct:.2f}%**"
-            )
-            st.latex(r"C_{op,N} \approx \frac{GVF}{1-GVF}\cdot \frac{p}{p_N}\cdot \frac{T_N}{T}\cdot \frac{1}{Z}\;\;[\mathrm{Ncm^3/L}]")
+            st.markdown("### 5) Gasgehalt am Betriebspunkt")
             if best_pump and dp_req is not None:
                 p_discharge = p_suction + float(best_pump["dp_avail"])
                 dissolved_d, free_d, sat_d = dissolved_free_at_pressure(p_discharge, C_target_cm3N_L, targets)
