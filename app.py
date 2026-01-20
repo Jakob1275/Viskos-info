@@ -1231,10 +1231,11 @@ def run_multi_phase_pump():
                     st.metric("Δp Abweichung", f"{best_pump['dp_err']*100:.1f}%")
             with p3:
                 st.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
+                st.metric("Gelöst (Druckseite, möglich)", f"{sat_d:.1f} Ncm³/L")
             with p4:
                 st.metric("Drehzahl / Modus", f"{best_pump['n_rpm']:.0f} rpm | {best_pump['mode']}")
-            st.metric("Gelöst (Druckseite, möglich)", f"{sat_d:.1f} Ncm³/L")
-            st.metric("Gelöst (Druckseite, vorhanden)", f"{dissolved_d:.1f} Ncm³/L")
+                st.metric("Gelöst (Druckseite, vorhanden)", f"{dissolved_d:.1f} Ncm³/L")
+            
             if "eta_est" in best_pump:
                 st.caption(
                     f"Score‑Details: η_est={best_pump['eta_est']:.2f} | Gas‑Abweichung={best_pump['gas_err']*100:.1f}%"
@@ -1298,7 +1299,6 @@ def run_multi_phase_pump():
                     a1, a2, a3, a4 = st.columns(4)
                     with a1:
                         st.metric("Gelöst (Druckseite, möglich)", f"{sat_vfd:.1f} Ncm³/L")
-                        st.metric("Gelöst (Druckseite, vorhanden)", f"{dissolved_vfd:.1f} Ncm³/L")
                     with a2:
                         st.metric("Freies Gas (Druckseite)", f"{free_vfd:.1f} Ncm³/L")
                     with a3:
@@ -1767,4 +1767,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
