@@ -1491,8 +1491,20 @@ def run_multi_phase_pump():
         ax3.grid(True)
         ax3.set_xlim(0, 14)
 
-        if p_req is not None:
-            ax3.scatter([p_req], [C_ziel], s=110, marker="^", color="tab:green", label="Zielpunkt (p_req, C_ziel)")
+        # Zielpunkt: Druckziel + erforderlicher Gasvolumenstrom (operativ) für den gewählten Q
+        if p_req is not None and best_pump and dp_req is not None:
+            Q_sel = float(best_pump["Q_m3h"])
+            q_gas_req_norm_lmin = gas_flow_required_norm_lmin(Q_sel, C_ziel)
+            ratio_req = oper_to_norm_ratio(p_req, temperature, gas_medium)
+            q_gas_req_oper_lmin = q_gas_req_norm_lmin / max(ratio_req, 1e-12)
+            ax3.scatter(
+                [p_req],
+                [q_gas_req_oper_lmin],
+                s=110,
+                marker="^",
+                color="tab:green",
+                label="Zielpunkt (p_req, Q_gas,req)"
+            )
 
         if best_pump and dp_req is not None:
             pump = best_pump["pump"]
@@ -1561,6 +1573,7 @@ def run_multi_phase_pump():
             st.markdown("**Ziel:** vollständige Lösung des Gases in der Flüssigkeit.")
             if gas_medium == "Luft":
                 st.markdown("- Luft wird als **N₂ (79%) + O₂ (21%)** modelliert.")
+                st.markdown("- **y** ist der molare/volumetrische Anteil im Gasgemisch (z.B. O₂: y=0.21).")
                 for g, y in AIR_COMPONENTS:
                     st.markdown(f"  - Ziel {g}:")
                     st.latex(rf"C_i = y\cdot C_{{ziel}} = {targets[g]:.1f}\;\mathrm{{Ncm^3/L}}")
