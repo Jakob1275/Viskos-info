@@ -737,22 +737,75 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
 
     return best
 
-def choose_best_mph_pump_autoQ(pumps, dp_req_bar, gvf_free_pct, nu_cSt, rho_liq,
+def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T_celsius, gas_medium,
+                              use_cziel_as_gvf, safety_factor_pct, use_interpolated_gvf,
+                              nu_cSt, rho_liq,
                               n_min_ratio=0.5, n_max_ratio=1.2,
                               w_power=0.5, w_eta=0.3, w_gas=0.2,
-                              C_target_cm3N_L=0.0, p_suction_bar_abs=1.0, T_celsius=20.0, gas_medium="Luft",
                               allow_speed_adjustment=False):
     """
     Q ist nicht Eingabe: es werden Kandidaten-Q aus Kennlinien geprüft.
     """
     best = None
-    dp_req = float(dp_req_bar)
-    gvf_free_pct = float(gvf_free_pct)
+    gas_target_norm_lmin = float(gas_target_norm_lmin)
+
+    def _calc_requirements_for_Q(Q_req_m3h):
+        Q_liq_lmin = m3h_to_lmin(Q_req_m3h)
+        C_target_cm3N_L = (1000.0 * gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12)
+
+        if gas_medium == "Luft":
+            p_req, targets = pressure_required_for_air_components(T_celsius, C_target_cm3N_L, p_min=0.2, p_max=200.0)
+        else:
+            p_req = pressure_required_for_C_target(gas_medium, T_celsius, C_target_cm3N_L, y_gas=1.0, p_min=0.2, p_max=200.0)
+            targets = {gas_medium: C_target_cm3N_L}
+
+        if p_req is None:
+            return None
+
+        dp_req = max(0.0, float(p_req) - float(p_suction_bar_abs))
+
+        dissolved_s = 0.0
+        free_s = 0.0
+        if gas_medium == "Luft":
+            for g, y in AIR_COMPONENTS:
+                C_i = targets.get(g, float(C_target_cm3N_L) * float(y))
+                C_sat_i = gas_solubility_cm3N_per_L(g, p_suction_bar_abs, T_celsius, y_gas=y)
+                dissolved_s += min(C_i, C_sat_i)
+                free_s += max(0.0, C_i - C_sat_i)
+            gvf_ref_gas = "Luft"
+        else:
+            C_sat_s = gas_solubility_cm3N_per_L(gas_medium, p_suction_bar_abs, T_celsius, y_gas=1.0)
+            dissolved_s = min(float(C_target_cm3N_L), C_sat_s)
+            free_s = max(0.0, float(C_target_cm3N_L) - C_sat_s)
+            gvf_ref_gas = gas_medium
+
+        if use_cziel_as_gvf:
+            gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(
+                C_target_cm3N_L, p_suction_bar_abs, T_celsius, gvf_ref_gas
+            )
+        else:
+            gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(free_s, p_suction_bar_abs, T_celsius, gvf_ref_gas)
+
+        gvf_s_pct_safe = gvf_s_pct * (1.0 + float(safety_factor_pct) / 100.0)
+        if use_interpolated_gvf:
+            gvf_curve_pct = gvf_s_pct_safe
+        else:
+            gvf_curve_pct = gvf_s_pct_safe
+
+        return {
+            "C_target_cm3N_L": C_target_cm3N_L,
+            "p_req": p_req,
+            "dp_req": dp_req,
+            "targets": targets,
+            "dissolved_s": dissolved_s,
+            "free_s": free_s,
+            "gvf_s_pct": gvf_s_pct,
+            "gvf_s_pct_safe": gvf_s_pct_safe,
+            "gvf_curve_pct": gvf_curve_pct,
+        }
 
     for pump in pumps:
         try:
-            if gvf_free_pct > pump["GVF_max"] * 100.0:
-                continue
             if nu_cSt > pump.get("max_viscosity", 500):
                 continue
             if rho_liq > pump.get("max_density", 1200):
@@ -764,16 +817,28 @@ def choose_best_mph_pump_autoQ(pumps, dp_req_bar, gvf_free_pct, nu_cSt, rho_liq,
             Q_candidates = [q for q in Q_candidates if q > 0]
 
             for Q_req in Q_candidates:
+                req = _calc_requirements_for_Q(Q_req)
+                if req is None:
+                    continue
+
+                if not use_interpolated_gvf:
+                    req["gvf_curve_pct"] = nearest_gvf_key(pump, req["gvf_s_pct_safe"])
+
+                if req["gvf_curve_pct"] > pump["GVF_max"] * 100.0:
+                    continue
+
                 cand = choose_best_mph_pump(
-                    [pump], Q_req_m3h=Q_req, dp_req_bar=dp_req, gvf_free_pct=gvf_free_pct,
+                    [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=req["gvf_curve_pct"],
                     nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
                     w_power=w_power, w_eta=w_eta, w_gas=w_gas,
-                    C_target_cm3N_L=C_target_cm3N_L, p_suction_bar_abs=p_suction_bar_abs,
+                    C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
                     T_celsius=T_celsius, gas_medium=gas_medium,
                     allow_speed_adjustment=allow_speed_adjustment
                 )
                 if cand is None:
                     continue
+
+                cand.update(req)
 
                 q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
                 edge_penalty = 0.0
@@ -1035,7 +1100,7 @@ def run_single_phase_pump():
 def run_multi_phase_pump():
     """
     Mehrphase:
-    - Eingaben: C_ziel [Ncm³/L] (Default 100), Gas, Medium, Temperatur
+    - Eingaben: C_ziel [L/min] (Norm-Volumenstrom), Gas, Medium, Temperatur
     - Saugseite FIX: p_s = P_SUCTION_FIXED_BAR_ABS (Unterdruck)
     - p_req (Austritt) so, dass ALLE Einzelgase vollständig gelöst sind (bei Luft: N2+O2)
     - dp_req = p_req - p_s => H_req (physikalisch mit rho)
@@ -1052,11 +1117,11 @@ def run_multi_phase_pump():
 
             with c1:
                 st.subheader("Gasmenge (Norm)")
-                C_ziel = st.number_input(
-                    "Ziel-Gasmenge C_ziel [Ncm³/L] (Normvolumen je Liter Flüssigkeit)",
-                    min_value=0.0, value=100.0, step=10.0
+                C_ziel_lmin = st.number_input(
+                    "Ziel-Gasvolumenstrom C_ziel [L/min] (Norm)",
+                    min_value=0.0, value=50.0, step=1.0
                 )
-                st.caption("100 Ncm³/L = 0.000100 Nm³/L (Norm)")
+                st.caption("C_ziel ist ein Norm-Volumenstrom. Umrechnung in Ncm³/L erfolgt über den Flüssigkeitsstrom.")
 
             with c2:
                 st.subheader("Gas / Medium / Temperatur")
@@ -1070,7 +1135,7 @@ def run_multi_phase_pump():
                 use_cziel_as_gvf = st.checkbox(
                     "GVF-Kennlinie aus C_ziel (Normvolumen-%)",
                     value=False,
-                    help="Wenn aktiv: C_ziel [Ncm³/L] wird physikalisch in GVF_s an der Saugseite umgerechnet. Kann mit GVF-Interpolation kombiniert werden."
+                    help="Wenn aktiv: C_ziel [L/min] wird physikalisch (über C_ziel in Ncm³/L) in GVF_s an der Saugseite umgerechnet. Kann mit GVF-Interpolation kombiniert werden."
                 )
                 use_interpolated_gvf = st.checkbox(
                     "GVF interpolieren (zwischen Kennlinien)",
@@ -1098,61 +1163,63 @@ def run_multi_phase_pump():
         # Umrechnungsfaktor bar -> m (physikalisch mit rho)
         BAR_TO_M_LIQ = (BAR_TO_PA) / (rho_liq * G)  # m pro bar
 
-        # 1) p_req bestimmen: vollständige Lösung (optimaler Punkt)
-        targets = None
-        if gas_medium == "Luft":
-            p_req, targets = pressure_required_for_air_components(temperature, C_ziel, p_min=0.2, p_max=200.0)
-        else:
-            p_req = pressure_required_for_C_target(gas_medium, temperature, C_ziel, y_gas=1.0, p_min=0.2, p_max=200.0)
-            targets = {gas_medium: C_ziel}
+        # 1) Pumpenauswahl: Q automatisch (C_ziel in L/min wird je Kandidat in Ncm³/L umgerechnet)
+        best_pump = None
+        w_sum = max(float(w_power + w_eta + w_gas), 1e-9)
+        w_power_n = float(w_power) / w_sum
+        w_eta_n = float(w_eta) / w_sum
+        w_gas_n = float(w_gas) / w_sum
 
-        if p_req is None:
+        best_pump = choose_best_mph_pump_autoQ(
+            MPH_PUMPS,
+            gas_target_norm_lmin=C_ziel_lmin,
+            p_suction_bar_abs=p_suction,
+            T_celsius=temperature,
+            gas_medium=gas_medium,
+            use_cziel_as_gvf=use_cziel_as_gvf,
+            safety_factor_pct=safety_factor,
+            use_interpolated_gvf=use_interpolated_gvf,
+            nu_cSt=nu_liq,
+            rho_liq=rho_liq,
+            w_power=w_power_n,
+            w_eta=w_eta_n,
+            w_gas=w_gas_n,
+            allow_speed_adjustment=False
+        )
+
+        if best_pump:
+            p_req = best_pump.get("p_req")
+            dp_req = best_pump.get("dp_req")
+            H_req_m = dp_req * BAR_TO_M_LIQ if dp_req is not None else None
+            targets = best_pump.get("targets")
+            dissolved_s = best_pump.get("dissolved_s", 0.0)
+            free_s = best_pump.get("free_s", 0.0)
+            gvf_s_pct = best_pump.get("gvf_s_pct", 0.0)
+            gvf_s_pct_safe = best_pump.get("gvf_s_pct_safe", 0.0)
+            gvf_curve_pct = best_pump.get("gvf_curve_pct", 0.0)
+            C_target_cm3N_L = best_pump.get("C_target_cm3N_L", 0.0)
+        else:
+            p_req = None
             dp_req = None
             H_req_m = None
-        else:
-            dp_req = max(0.0, float(p_req) - p_suction)
-            H_req_m = dp_req * BAR_TO_M_LIQ
+            targets = None
+            dissolved_s = 0.0
+            free_s = 0.0
+            gvf_s_pct = 0.0
+            gvf_s_pct_safe = 0.0
+            gvf_curve_pct = 0.0
+            C_target_cm3N_L = 0.0
 
-        # 2) Freies Gas an Saugseite (für GVF_s)
-        dissolved_s = 0.0
-        free_s = 0.0
+        frac_diss_s = (dissolved_s / C_target_cm3N_L * 100.0) if C_target_cm3N_L > 0 else 0.0
+        frac_free_s = (free_s / C_target_cm3N_L * 100.0) if C_target_cm3N_L > 0 else 0.0
 
-        if gas_medium == "Luft":
-            for g, y in AIR_COMPONENTS:
-                C_i = targets.get(g, float(C_ziel) * float(y))
-                C_sat_i = gas_solubility_cm3N_per_L(g, p_suction, temperature, y_gas=y)
-                dissolved_s += min(C_i, C_sat_i)
-                free_s += max(0.0, C_i - C_sat_i)
-            gvf_ref_gas = "Luft"
-        else:
-            C_sat_s = gas_solubility_cm3N_per_L(gas_medium, p_suction, temperature, y_gas=1.0)
-            dissolved_s = min(float(C_ziel), C_sat_s)
-            free_s = max(0.0, float(C_ziel) - C_sat_s)
-            gvf_ref_gas = gas_medium
-
-        if use_cziel_as_gvf:
-            # Physikalisch: Normvolumen -> GVF_s an der Saugseite (p,T,Z)
-            gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(
-                C_ziel, p_suction, temperature, gvf_ref_gas
-            )
-        else:
-            gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(free_s, p_suction, temperature, gvf_ref_gas)
-        gvf_s_pct_safe = gvf_s_pct * (1.0 + safety_factor / 100.0)
-        if use_interpolated_gvf:
-            gvf_curve_pct = gvf_s_pct_safe
-        else:
-            gvf_curve_pct = nearest_gvf_key(MPH_PUMPS[0], gvf_s_pct_safe) if MPH_PUMPS else gvf_s_pct_safe
-
-        frac_diss_s = (dissolved_s / C_ziel * 100.0) if C_ziel > 0 else 0.0
-        frac_free_s = (free_s / C_ziel * 100.0) if C_ziel > 0 else 0.0
-
-        def dissolved_free_at_pressure(p_abs_bar):
+        def dissolved_free_at_pressure(p_abs_bar, C_target_cm3N_L, targets_local):
             dissolved = 0.0
             free = 0.0
             sat_total = 0.0
             if gas_medium == "Luft":
                 for g, y in AIR_COMPONENTS:
-                    C_i = targets.get(g, float(C_ziel) * float(y))
+                    C_i = targets_local.get(g, float(C_target_cm3N_L) * float(y)) if targets_local else float(C_target_cm3N_L) * float(y)
                     C_sat_i = gas_solubility_cm3N_per_L(g, p_abs_bar, temperature, y_gas=y)
                     sat_total += C_sat_i
                     dissolved += min(C_i, C_sat_i)
@@ -1160,33 +1227,9 @@ def run_multi_phase_pump():
             else:
                 C_sat = gas_solubility_cm3N_per_L(gas_medium, p_abs_bar, temperature, y_gas=1.0)
                 sat_total = C_sat
-                dissolved = min(float(C_ziel), C_sat)
-                free = max(0.0, float(C_ziel) - C_sat)
+                dissolved = min(float(C_target_cm3N_L), C_sat)
+                free = max(0.0, float(C_target_cm3N_L) - C_sat)
             return dissolved, free, sat_total
-
-        # 3) Pumpenauswahl: Q automatisch
-        best_pump = None
-        w_sum = max(float(w_power + w_eta + w_gas), 1e-9)
-        w_power_n = float(w_power) / w_sum
-        w_eta_n = float(w_eta) / w_sum
-        w_gas_n = float(w_gas) / w_sum
-
-        if dp_req is not None:
-            best_pump = choose_best_mph_pump_autoQ(
-                MPH_PUMPS,
-                dp_req_bar=dp_req,
-                gvf_free_pct=gvf_curve_pct,
-                nu_cSt=nu_liq,
-                rho_liq=rho_liq,
-                w_power=w_power_n,
-                w_eta=w_eta_n,
-                w_gas=w_gas_n,
-                C_target_cm3N_L=C_ziel,
-                p_suction_bar_abs=p_suction,
-                T_celsius=temperature,
-                gas_medium=gas_medium,
-                allow_speed_adjustment=False
-            )
 
         # =========================
         # Ergebnisse
@@ -1212,7 +1255,7 @@ def run_multi_phase_pump():
 
         if best_pump and dp_req is not None:
             p_discharge = p_suction + float(best_pump["dp_avail"])
-            dissolved_d, free_d, sat_d = dissolved_free_at_pressure(p_discharge)
+            dissolved_d, free_d, sat_d = dissolved_free_at_pressure(p_discharge, C_target_cm3N_L, targets)
             gvf_src = "aus C_ziel" if use_cziel_as_gvf else "physikalisch"
             gvf_display = f"{gvf_curve_pct:.1f}%" if use_interpolated_gvf else f"{gvf_curve_pct:.0f}%"
             gvf_mode = "interpoliert" if use_interpolated_gvf else "diskret"
@@ -1291,7 +1334,7 @@ def run_multi_phase_pump():
 
                     st.markdown("**Drehzahlanpassung (Alternative) – Energievergleich**")
                     p_discharge_vfd = p_suction + float(cand_map["vfd"]["dp"])
-                    dissolved_vfd, free_vfd, sat_vfd = dissolved_free_at_pressure(p_discharge_vfd)
+                    dissolved_vfd, free_vfd, sat_vfd = dissolved_free_at_pressure(p_discharge_vfd, C_target_cm3N_L, targets)
 
                     a1, a2, a3, a4 = st.columns(4)
                     with a1:
@@ -1311,7 +1354,7 @@ def run_multi_phase_pump():
         # Diagramme
         # =========================
         st.subheader("Diagramme")
-        fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(32, 6))
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(24, 6))
 
         # --- Löslichkeit ---
         if gas_medium == "Luft":
@@ -1334,14 +1377,15 @@ def run_multi_phase_pump():
                     p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
                     ax1.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
 
-            ax1.axhline(C_ziel, linestyle=":", alpha=0.9, label="C_ziel (Luft)")
-            ax1.text(13.8, C_ziel, "C_ziel (Luft)", va="center", ha="right", fontsize=8)
+            if C_target_cm3N_L > 0:
+                ax1.axhline(C_target_cm3N_L, linestyle=":", alpha=0.9, label="C_ziel (Luft)")
+                ax1.text(13.8, C_target_cm3N_L, "C_ziel (Luft)", va="center", ha="right", fontsize=8)
 
             Csat_s_mix = gas_solubility_cm3N_per_L("Luft", p_suction, temperature, y_gas=1.0)
             ax1.scatter([p_suction], [Csat_s_mix], s=60, label="C_sat @ p_s (Luft)")
 
-            if p_req is not None:
-                ax1.scatter([p_req], [C_ziel], s=110, marker="^", label="p_req (Luft)")
+            if p_req is not None and C_target_cm3N_L > 0:
+                ax1.scatter([p_req], [C_target_cm3N_L], s=110, marker="^", label="p_req (Luft)")
                 ax1.axvline(p_req, linestyle=":", alpha=0.6, label="p_req")
 
         else:
@@ -1354,11 +1398,12 @@ def run_multi_phase_pump():
                 p_arr, sol_arr = solubility_diagonal_curve(gas_medium, temperature, y_gas=1.0)
                 ax1.plot(p_arr, sol_arr, "--", label=f"{gas_medium} @ {temperature:.0f}°C")
 
-            ax1.axhline(C_ziel, linestyle=":", alpha=0.8)
-            ax1.text(13.8, C_ziel, "C_ziel", va="center", ha="right", fontsize=9)
+            if C_target_cm3N_L > 0:
+                ax1.axhline(C_target_cm3N_L, linestyle=":", alpha=0.8)
+                ax1.text(13.8, C_target_cm3N_L, "C_ziel", va="center", ha="right", fontsize=9)
 
-            if p_req is not None:
-                ax1.scatter([p_req], [C_ziel], s=110, marker="^", label="p_req")
+            if p_req is not None and C_target_cm3N_L > 0:
+                ax1.scatter([p_req], [C_target_cm3N_L], s=110, marker="^", label="p_req")
                 ax1.axvline(p_req, linestyle=":", alpha=0.6, label="p_req")
 
         if show_ref_targets:
@@ -1441,23 +1486,28 @@ def run_multi_phase_pump():
             ax2.set_title("Mehrphasen-Kennlinien")
             ax2.grid(True)
 
-        # --- Solubility + Pump curve vs pressure ---
+        # --- Löslichkeit + Pumpenkennlinie (beide in L/min) ---
         c_sat_curve_p = None
         c_sat_curve_c = None
         p_abs_curve = None
         c_norm_curve = None
         q_gas_lmin_curve = None
+        q_liq_lmin_plot = m3h_to_lmin(best_pump["Q_m3h"]) if best_pump else None
 
         if gas_medium == "Luft":
             if show_temp_band:
                 for T in [temperature - 10, temperature, temperature + 10]:
                     if -10 <= T <= 150:
                         p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
-                        ax3.plot(p_arr, sol_arr, "-", alpha=0.7,
-                                 label=f"Löslichkeit (Luft) @ {T:.0f}°C")
+                        if q_liq_lmin_plot:
+                            sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                            ax3.plot(p_arr, sol_lmin, "-", alpha=0.7,
+                                     label=f"Löslichkeit (Luft) @ {T:.0f}°C")
             else:
                 p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
-                ax3.plot(p_arr, sol_arr, "-", label=f"Löslichkeit (Luft) @ {temperature:.0f}°C")
+                if q_liq_lmin_plot:
+                    sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                    ax3.plot(p_arr, sol_lmin, "-", label=f"Löslichkeit (Luft) @ {temperature:.0f}°C")
                 c_sat_curve_p = p_arr.tolist()
                 c_sat_curve_c = sol_arr.tolist()
 
@@ -1466,38 +1516,49 @@ def run_multi_phase_pump():
                     for T in [temperature - 10, temperature, temperature + 10]:
                         if -10 <= T <= 150:
                             p_arr, sol_arr = solubility_diagonal_curve(g, T, y_gas=y)
-                            ax3.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
+                            if q_liq_lmin_plot:
+                                sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                                ax3.plot(p_arr, sol_lmin, "--", alpha=0.35, label="_nolegend_")
                 else:
                     p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
-                    ax3.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
+                    if q_liq_lmin_plot:
+                        sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                        ax3.plot(p_arr, sol_lmin, "--", alpha=0.35, label="_nolegend_")
         else:
             if show_temp_band:
                 for T in [temperature - 10, temperature, temperature + 10]:
                     if -10 <= T <= 150:
                         p_arr, sol_arr = solubility_diagonal_curve(gas_medium, T, y_gas=1.0)
-                        ax3.plot(p_arr, sol_arr, "--", alpha=0.7,
-                                 label=f"Löslichkeit ({gas_medium}) @ {T:.0f}°C")
+                        if q_liq_lmin_plot:
+                            sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                            ax3.plot(p_arr, sol_lmin, "--", alpha=0.7,
+                                     label=f"Löslichkeit ({gas_medium}) @ {T:.0f}°C")
             else:
                 p_arr, sol_arr = solubility_diagonal_curve(gas_medium, temperature, y_gas=1.0)
-                ax3.plot(p_arr, sol_arr, "--", label=f"Löslichkeit ({gas_medium}) @ {temperature:.0f}°C")
+                if q_liq_lmin_plot:
+                    sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                    ax3.plot(p_arr, sol_lmin, "--", label=f"Löslichkeit ({gas_medium}) @ {temperature:.0f}°C")
                 c_sat_curve_p = p_arr.tolist()
                 c_sat_curve_c = sol_arr.tolist()
 
         ax3.set_xlabel("Absolutdruck [bar]")
-        ax3.set_ylabel("Gasgehalt [Ncm³/L]")
-        ax3.set_title("Löslichkeit (Ncm³/L) + Pumpenkennlinie (L/min)")
+        ax3.set_ylabel("Gasvolumenstrom [L/min]")
+        ax3.set_title("Löslichkeit (umgerechnet) + Pumpenkennlinie (L/min)")
         ax3.grid(True)
         ax3.set_xlim(0, 14)
 
-        ax3.axhline(C_ziel, linestyle=":", alpha=0.9, label="C_ziel")
-        ax3.text(13.8, C_ziel, "C_ziel", va="center", ha="right", fontsize=8)
+        if not q_liq_lmin_plot:
+            ax3.text(0.5, 0.5, "Keine geeignete Pumpe / kein Q", ha="center", va="center", transform=ax3.transAxes)
+
+        if q_liq_lmin_plot:
+            ax3.axhline(C_ziel_lmin, linestyle=":", alpha=0.9, label="C_ziel")
+            ax3.text(13.8, C_ziel_lmin, "C_ziel", va="center", ha="right", fontsize=8)
         if show_ref_targets:
             for Cref in [50.0, 100.0, 150.0]:
-                ax3.axhline(Cref, linestyle=":", alpha=0.25)
-                ax3.text(13.8, Cref, f"{Cref:.0f} Ncm³/L", va="center", ha="right", fontsize=8)
-
-        ax3b = ax3.twinx()
-        ax3b.set_ylabel("Gasvolumenstrom [L/min]")
+                if q_liq_lmin_plot:
+                    Cref_lmin = (Cref / 1000.0) * q_liq_lmin_plot
+                    ax3.axhline(Cref_lmin, linestyle=":", alpha=0.25)
+                    ax3.text(13.8, Cref_lmin, f"{Cref_lmin:.1f} L/min", va="center", ha="right", fontsize=8)
 
         if best_pump and dp_req is not None:
             pump = best_pump["pump"]
@@ -1530,15 +1591,15 @@ def run_multi_phase_pump():
                 p_abs_curve = p_abs
                 c_norm_curve = C_norm_curve
                 q_gas_lmin_curve = Q_gas_lmin
-                ax3b.plot(p_abs, Q_gas_lmin, "-", linewidth=2.5, color="tab:red",
-                          label=f"Pumpe (Gasstrom, GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
+                ax3.plot(p_abs, Q_gas_lmin, "-", linewidth=2.5, color="tab:red",
+                         label=f"Pumpe (Gasstrom, GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
 
                 C_op = (
                     (m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))))
                     * oper_to_norm_ratio(p_suction + best_pump["dp_avail"], temperature, gas_medium)
                     / max(Q_liq_lmin, 1e-12) * 1000.0
                 )
-                ax3b.scatter(
+                ax3.scatter(
                     [p_suction + best_pump["dp_avail"]],
                     [m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac)))],
                     s=80,
@@ -1547,21 +1608,22 @@ def run_multi_phase_pump():
                     label="Betriebspunkt (Gasstrom)"
                 )
 
-                # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (Ncm³/L)
-                if c_sat_curve_p and c_sat_curve_c:
+                # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (L/min)
+                if c_sat_curve_p and c_sat_curve_c and q_liq_lmin_plot:
                     c_sat_at_p = [safe_interp(p, c_sat_curve_p, c_sat_curve_c) for p in p_abs]
+                    c_sat_at_p_lmin = [(c / 1000.0) * q_liq_lmin_plot for c in c_sat_at_p]
                     hit = None
                     for i in range(len(p_abs) - 1):
-                        d0 = C_norm_curve[i] - c_sat_at_p[i]
-                        d1 = C_norm_curve[i + 1] - c_sat_at_p[i + 1]
+                        d0 = Q_gas_lmin[i] - c_sat_at_p_lmin[i]
+                        d1 = Q_gas_lmin[i + 1] - c_sat_at_p_lmin[i + 1]
                         if d0 == 0:
-                            hit = (p_abs[i], C_norm_curve[i])
+                            hit = (p_abs[i], Q_gas_lmin[i])
                             break
                         if d0 * d1 < 0:
                             t = abs(d0) / (abs(d0) + abs(d1))
                             p_hit = p_abs[i] + (p_abs[i + 1] - p_abs[i]) * t
-                            c_hit = C_norm_curve[i] + (C_norm_curve[i + 1] - C_norm_curve[i]) * t
-                            hit = (p_hit, c_hit)
+                            q_hit = Q_gas_lmin[i] + (Q_gas_lmin[i + 1] - Q_gas_lmin[i]) * t
+                            hit = (p_hit, q_hit)
                             break
 
                     if hit is not None:
@@ -1573,93 +1635,8 @@ def run_multi_phase_pump():
                             color="tab:green",
                             label="Schnittpunkt (Sättigung)"
                         )
-                        q_hit = safe_interp(hit[0], p_abs, Q_gas_lmin)
-                        ax3b.scatter(
-                            [hit[0]],
-                            [q_hit],
-                            s=90,
-                            marker="^",
-                            color="tab:red",
-                            label="Schnittpunkt (Gasstrom)"
-                        )
 
-        handles1, labels1 = ax3.get_legend_handles_labels()
-        handles2, labels2 = ax3b.get_legend_handles_labels()
-        ax3.legend(handles1 + handles2, labels1 + labels2, loc="best")
-
-        # --- Solubility + Pump curve (einheitlich Ncm³/L, aus Gasstrom umgerechnet) ---
-        if gas_medium == "Luft":
-            if show_temp_band:
-                for T in [temperature - 10, temperature, temperature + 10]:
-                    if -10 <= T <= 150:
-                        p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
-                        ax4.plot(p_arr, sol_arr, "-", alpha=0.7,
-                                 label=f"Löslichkeit (Luft) @ {T:.0f}°C")
-            else:
-                p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
-                ax4.plot(p_arr, sol_arr, "-", label=f"Löslichkeit (Luft) @ {temperature:.0f}°C")
-
-            for g, y in AIR_COMPONENTS:
-                if show_temp_band:
-                    for T in [temperature - 10, temperature, temperature + 10]:
-                        if -10 <= T <= 150:
-                            p_arr, sol_arr = solubility_diagonal_curve(g, T, y_gas=y)
-                            ax4.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
-                else:
-                    p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
-                    ax4.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
-        else:
-            if show_temp_band:
-                for T in [temperature - 10, temperature, temperature + 10]:
-                    if -10 <= T <= 150:
-                        p_arr, sol_arr = solubility_diagonal_curve(gas_medium, T, y_gas=1.0)
-                        ax4.plot(p_arr, sol_arr, "--", alpha=0.7,
-                                 label=f"Löslichkeit ({gas_medium}) @ {T:.0f}°C")
-            else:
-                p_arr, sol_arr = solubility_diagonal_curve(gas_medium, temperature, y_gas=1.0)
-                ax4.plot(p_arr, sol_arr, "--", label=f"Löslichkeit ({gas_medium}) @ {temperature:.0f}°C")
-
-        ax4.axhline(C_ziel, linestyle=":", alpha=0.9, label="C_ziel")
-        ax4.text(13.8, C_ziel, "C_ziel", va="center", ha="right", fontsize=8)
-        if show_ref_targets:
-            for Cref in [50.0, 100.0, 150.0]:
-                ax4.axhline(Cref, linestyle=":", alpha=0.25)
-                ax4.text(13.8, Cref, f"{Cref:.0f} Ncm³/L", va="center", ha="right", fontsize=8)
-
-        if p_abs_curve and c_norm_curve:
-            ax4.plot(p_abs_curve, c_norm_curve, "-", linewidth=2.5, color="tab:red",
-                     label="Gasbedarf c_G,req (aus V̇_G, Ncm³/L)")
-            p_op = p_suction + float(best_pump["dp_avail"]) if best_pump else None
-            if p_op is not None:
-                c_op = safe_interp(p_op, p_abs_curve, c_norm_curve)
-                ax4.scatter([p_op], [c_op], s=80, color="tab:red", marker="x", label="Betriebspunkt (c_G,req)")
-
-            if c_sat_curve_p and c_sat_curve_c:
-                c_sat_at_p = [safe_interp(p, c_sat_curve_p, c_sat_curve_c) for p in p_abs_curve]
-                hit = None
-                for i in range(len(p_abs_curve) - 1):
-                    d0 = c_norm_curve[i] - c_sat_at_p[i]
-                    d1 = c_norm_curve[i + 1] - c_sat_at_p[i + 1]
-                    if d0 == 0:
-                        hit = (p_abs_curve[i], c_norm_curve[i])
-                        break
-                    if d0 * d1 < 0:
-                        t = abs(d0) / (abs(d0) + abs(d1))
-                        p_hit = p_abs_curve[i] + (p_abs_curve[i + 1] - p_abs_curve[i]) * t
-                        c_hit = c_norm_curve[i] + (c_norm_curve[i + 1] - c_norm_curve[i]) * t
-                        hit = (p_hit, c_hit)
-                        break
-
-                if hit is not None:
-                    ax4.scatter([hit[0]], [hit[1]], s=120, marker="^", color="tab:green",
-                                label="Schnittpunkt (Sättigung)")
-
-        ax4.set_xlabel("Absolutdruck [bar]")
-        ax4.set_ylabel("Gasgehalt [Ncm³/L]")
-        ax4.set_title("Löslichkeit vs. Gasbedarf (einheitlich Ncm³/L)")
-        ax4.grid(True)
-        ax4.set_xlim(0, 14)
-        ax4.legend()
+        ax3.legend(loc="best")
 
         plt.tight_layout()
         st.pyplot(fig)
@@ -1670,7 +1647,7 @@ def run_multi_phase_pump():
         with st.expander("Detaillierter Rechenweg (Mehrphase)"):
             st.markdown("### 0) Überblick")
             st.markdown(
-                "Ziel: Aus **C_ziel**, Gas/Medium und Temperatur den erforderlichen Druck bestimmen, "
+                "Ziel: Aus **C_ziel [L/min]**, Gas/Medium und Temperatur den erforderlichen Druck bestimmen, "
                 "GVF_s an der Saugseite ableiten, eine passende GVF‑Kennlinie wählen und anschließend "
                 "die energetisch optimale Pumpe (gewichtete Kombination) bestimmen."
             )
@@ -1679,7 +1656,13 @@ def run_multi_phase_pump():
             st.markdown("---")
             st.markdown("### 1) Eingaben & Basisgrößen")
             st.markdown(f"- **p_s (fix):** {p_suction:.2f} bar(abs)")
-            st.markdown(f"- **C_ziel:** {C_ziel:.1f} Ncm³/L  (= {C_ziel/1e6:.6f} Nm³/L)")
+            st.markdown(f"- **C_ziel:** {C_ziel_lmin:.1f} L/min (Norm)")
+            if best_pump:
+                Q_liq_lmin = m3h_to_lmin(best_pump["Q_m3h"])
+                st.latex(r"C_{ziel}\,[\mathrm{Ncm^3/L}] = 1000\cdot \frac{\dot V_{G,N}\,[\mathrm{L/min}]}{\dot V_{L}\,[\mathrm{L/min}]}")
+                st.markdown(
+                    f"- Umrechnung: **C_ziel** → **{C_target_cm3N_L:.1f} Ncm³/L** bei Q={Q_liq_lmin:.1f} L/min"
+                )
             st.markdown(f"- **Gas:** {gas_medium} | **Medium:** {liquid_medium} | **T:** {temperature:.1f} °C")
             st.markdown(f"- **Sicherheitsfaktor GVF_s:** {safety_factor:.0f}%")
             st.markdown(f"- **Umrechnung bar→m:** \(H=\\Delta p/(\\rho g)\) ⇒ 1 bar = {BAR_TO_M_LIQ:.2f} m (bei ρ={rho_liq:.0f} kg/m³)")
@@ -1694,7 +1677,8 @@ def run_multi_phase_pump():
                 st.markdown("- **y** ist der molare/volumetrische Anteil im Gasgemisch (z.B. O₂: y=0.21).")
                 for g, y in AIR_COMPONENTS:
                     st.markdown(f"  - Ziel {g}:")
-                    st.latex(rf"C_i = y\cdot C_{{ziel}} = {targets[g]:.1f}\;\mathrm{{Ncm^3/L}}")
+                    if targets:
+                        st.latex(rf"C_i = y\cdot C_{{ziel}} = {targets[g]:.1f}\;\mathrm{{Ncm^3/L}}")
                 st.latex(r"p_{req}=\max_i\{p_{req,i}\}\quad\text{mit}\quad C_{sat,i}(p_{req,i},T)\ge C_i")
             else:
                 st.latex(r"C_{sat}(p_{req},T)\ge C_{ziel}")
@@ -1716,6 +1700,8 @@ def run_multi_phase_pump():
             st.markdown("---")
             st.markdown("### 4) Freies Gas an der Saugseite → GVF_s")
             st.latex(r"C_{free,s}=\max(0, C_{ziel}-C_{sat}(p_s,T)) \quad(\text{bzw. Summe über Komponenten})")
+            if C_target_cm3N_L > 0:
+                st.markdown(f"- Umgerechnet: **C_ziel = {C_target_cm3N_L:.1f} Ncm³/L**")
             st.markdown(f"- @p_s: gelöst = {dissolved_s:.1f} Ncm³/L, frei = {free_s:.1f} Ncm³/L")
             st.latex(r"GVF_s=\frac{V_{gas,op}}{1+V_{gas,op}}\cdot 100\%")
             st.markdown(f"- GVF_s = {gvf_s_pct:.2f}% → mit Sicherheit: **{gvf_s_pct_safe:.2f}%**")
@@ -1731,11 +1717,11 @@ def run_multi_phase_pump():
             st.latex(r"C_{op,N} \approx \frac{GVF}{1-GVF}\cdot \frac{p}{p_N}\cdot \frac{T_N}{T}\cdot \frac{1}{Z}\;\;[\mathrm{Ncm^3/L}]")
             if best_pump and dp_req is not None:
                 p_discharge = p_suction + float(best_pump["dp_avail"])
-                dissolved_d, free_d, sat_d = dissolved_free_at_pressure(p_discharge)
+                dissolved_d, free_d, sat_d = dissolved_free_at_pressure(p_discharge, C_target_cm3N_L, targets)
                 st.markdown(f"- Gelöst (Druckseite, möglich): **{sat_d:.1f} Ncm³/L**")
                 st.markdown(f"- Gelöst (Druckseite, vorhanden): **{dissolved_d:.1f} Ncm³/L**")
                 st.markdown(f"- Freies Gas (Druckseite, aus Löslichkeit): **{free_d:.1f} Ncm³/L**")
-            st.caption("‘Möglich’ entspricht $C_{sat}$, ‘vorhanden’ ist durch $C_{ziel}$ begrenzt.")
+            st.caption("‘Möglich’ entspricht $C_{sat}$, ‘vorhanden’ ist durch $C_{ziel}$ (umgerechnet) begrenzt.")
 
             st.markdown("---")
             st.markdown("### 6) Pumpenauswahl & Affinitätsgesetze")
