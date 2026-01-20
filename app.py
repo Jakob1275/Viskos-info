@@ -1456,38 +1456,46 @@ def run_multi_phase_pump():
             ax2.grid(True)
 
         # --- Solubility + Pump curve vs pressure ---
-        if gas_medium == "Luft":
+        q_sat_curve_p = None
+        q_sat_curve_q = None
+
+        if best_pump and dp_req is not None:
+            Q_sel = float(best_pump["Q_m3h"])
+            p_arr = np.linspace(0.2, 14.0, 140)
+
+            def _csol(p, T):
+                if gas_medium == "Luft":
+                    return gas_solubility_cm3N_per_L("Luft", p, T, y_gas=1.0)
+                return gas_solubility_cm3N_per_L(gas_medium, p, T, y_gas=1.0)
+
             if show_temp_band:
                 for T in [temperature - 10, temperature, temperature + 10]:
                     if -10 <= T <= 150:
-                        p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
-                        ax3.plot(p_arr, sol_arr, "-", alpha=0.7, label=f"Luft (Gemisch) @ {T:.0f}°C")
+                        sol_arr = [_csol(p, T) for p in p_arr]
+                        q_norm = [gas_flow_required_norm_lmin(Q_sel, c) for c in sol_arr]
+                        q_oper = [q / max(oper_to_norm_ratio(p, T, gas_medium), 1e-12) for q, p in zip(q_norm, p_arr)]
+                        ax3.plot(p_arr, q_oper, "--", alpha=0.7, color="tab:green",
+                                 label=f"Löslichkeit (max. Gasstrom) @ {T:.0f}°C")
             else:
+                sol_arr = [_csol(p, temperature) for p in p_arr]
+                q_norm = [gas_flow_required_norm_lmin(Q_sel, c) for c in sol_arr]
+                q_oper = [q / max(oper_to_norm_ratio(p, temperature, gas_medium), 1e-12) for q, p in zip(q_norm, p_arr)]
+                ax3.plot(p_arr, q_oper, "--", color="tab:green",
+                         label=f"Löslichkeit (max. Gasstrom) @ {temperature:.0f}°C")
+
+                q_sat_curve_p = p_arr.tolist()
+                q_sat_curve_q = q_oper
+        else:
+            if gas_medium == "Luft":
                 p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
                 ax3.plot(p_arr, sol_arr, "-", label=f"Luft (Gemisch) @ {temperature:.0f}°C")
-
-            for g, y in AIR_COMPONENTS:
-                if show_temp_band:
-                    for T in [temperature - 10, temperature, temperature + 10]:
-                        if -10 <= T <= 150:
-                            p_arr, sol_arr = solubility_diagonal_curve(g, T, y_gas=y)
-                            ax3.plot(p_arr, sol_arr, "--", alpha=0.6, label=f"{g} (y={y:.2f}) @ {T:.0f}°C")
-                else:
-                    p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
-                    ax3.plot(p_arr, sol_arr, "--", label=f"{g} (y={y:.2f})")
-        else:
-            if show_temp_band:
-                for T in [temperature - 10, temperature, temperature + 10]:
-                    if -10 <= T <= 150:
-                        p_arr, sol_arr = solubility_diagonal_curve(gas_medium, T, y_gas=1.0)
-                        ax3.plot(p_arr, sol_arr, "--", label=f"{gas_medium} @ {T:.0f}°C")
             else:
                 p_arr, sol_arr = solubility_diagonal_curve(gas_medium, temperature, y_gas=1.0)
                 ax3.plot(p_arr, sol_arr, "--", label=f"{gas_medium} @ {temperature:.0f}°C")
 
         ax3.set_xlabel("Absolutdruck [bar]")
-        ax3.set_ylabel("Löslichkeit [Ncm³/L] / Gasvolumenstrom [L/min]")
-        ax3.set_title("Löslichkeit + Pumpenkennlinie (gemeinsame y-Achse)")
+        ax3.set_ylabel("Gasvolumenstrom [L/min]")
+        ax3.set_title("Löslichkeit (als Gasstrom) + Pumpenkennlinie")
         ax3.grid(True)
         ax3.set_xlim(0, 14)
 
@@ -1526,34 +1534,32 @@ def run_multi_phase_pump():
                     label="Betriebspunkt (Gas)"
                 )
 
-                # Schnittpunkt: Pumpenkennlinie vs. erforderlicher Gasstrom aus C_ziel(p)
-                q_gas_req_norm_lmin = gas_flow_required_norm_lmin(Q_sel, C_ziel)
-                q_req_curve = [q_gas_req_norm_lmin / max(oper_to_norm_ratio(p, temperature, gas_medium), 1e-12)
-                               for p in p_abs]
+                # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (als Gasstrom)
+                if q_sat_curve_p and q_sat_curve_q:
+                    q_sat_at_p = [safe_interp(p, q_sat_curve_p, q_sat_curve_q) for p in p_abs]
+                    hit = None
+                    for i in range(len(p_abs) - 1):
+                        d0 = Q_gas_lmin[i] - q_sat_at_p[i]
+                        d1 = Q_gas_lmin[i + 1] - q_sat_at_p[i + 1]
+                        if d0 == 0:
+                            hit = (p_abs[i], Q_gas_lmin[i])
+                            break
+                        if d0 * d1 < 0:
+                            t = abs(d0) / (abs(d0) + abs(d1))
+                            p_hit = p_abs[i] + (p_abs[i + 1] - p_abs[i]) * t
+                            q_hit = Q_gas_lmin[i] + (Q_gas_lmin[i + 1] - Q_gas_lmin[i]) * t
+                            hit = (p_hit, q_hit)
+                            break
 
-                hit = None
-                for i in range(len(p_abs) - 1):
-                    d0 = Q_gas_lmin[i] - q_req_curve[i]
-                    d1 = Q_gas_lmin[i + 1] - q_req_curve[i + 1]
-                    if d0 == 0:
-                        hit = (p_abs[i], Q_gas_lmin[i])
-                        break
-                    if d0 * d1 < 0:
-                        t = abs(d0) / (abs(d0) + abs(d1))
-                        p_hit = p_abs[i] + (p_abs[i + 1] - p_abs[i]) * t
-                        q_hit = Q_gas_lmin[i] + (Q_gas_lmin[i + 1] - Q_gas_lmin[i]) * t
-                        hit = (p_hit, q_hit)
-                        break
-
-                if hit is not None:
-                    ax3.scatter(
-                        [hit[0]],
-                        [hit[1]],
-                        s=120,
-                        marker="^",
-                        color="tab:green",
-                        label="Schnittpunkt (Pumpenlinie ∩ Löslichkeitsziel)"
-                    )
+                    if hit is not None:
+                        ax3.scatter(
+                            [hit[0]],
+                            [hit[1]],
+                            s=120,
+                            marker="^",
+                            color="tab:green",
+                            label="Schnittpunkt (Pumpenlinie ∩ Löslichkeit)"
+                        )
 
         ax3.legend(loc="best")
 
