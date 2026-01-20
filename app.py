@@ -1491,21 +1491,6 @@ def run_multi_phase_pump():
         ax3.grid(True)
         ax3.set_xlim(0, 14)
 
-        # Zielpunkt: Druckziel + erforderlicher Gasvolumenstrom (operativ) für den gewählten Q
-        if p_req is not None and best_pump and dp_req is not None:
-            Q_sel = float(best_pump["Q_m3h"])
-            q_gas_req_norm_lmin = gas_flow_required_norm_lmin(Q_sel, C_ziel)
-            ratio_req = oper_to_norm_ratio(p_req, temperature, gas_medium)
-            q_gas_req_oper_lmin = q_gas_req_norm_lmin / max(ratio_req, 1e-12)
-            ax3.scatter(
-                [p_req],
-                [q_gas_req_oper_lmin],
-                s=110,
-                marker="^",
-                color="tab:green",
-                label="Zielpunkt (p_req, Q_gas,req)"
-            )
-
         if best_pump and dp_req is not None:
             pump = best_pump["pump"]
             Q_sel = float(best_pump["Q_m3h"])
@@ -1540,6 +1525,35 @@ def run_multi_phase_pump():
                     marker="x",
                     label="Betriebspunkt (Gas)"
                 )
+
+                # Schnittpunkt: Pumpenkennlinie vs. erforderlicher Gasstrom aus C_ziel(p)
+                q_gas_req_norm_lmin = gas_flow_required_norm_lmin(Q_sel, C_ziel)
+                q_req_curve = [q_gas_req_norm_lmin / max(oper_to_norm_ratio(p, temperature, gas_medium), 1e-12)
+                               for p in p_abs]
+
+                hit = None
+                for i in range(len(p_abs) - 1):
+                    d0 = Q_gas_lmin[i] - q_req_curve[i]
+                    d1 = Q_gas_lmin[i + 1] - q_req_curve[i + 1]
+                    if d0 == 0:
+                        hit = (p_abs[i], Q_gas_lmin[i])
+                        break
+                    if d0 * d1 < 0:
+                        t = abs(d0) / (abs(d0) + abs(d1))
+                        p_hit = p_abs[i] + (p_abs[i + 1] - p_abs[i]) * t
+                        q_hit = Q_gas_lmin[i] + (Q_gas_lmin[i + 1] - Q_gas_lmin[i]) * t
+                        hit = (p_hit, q_hit)
+                        break
+
+                if hit is not None:
+                    ax3.scatter(
+                        [hit[0]],
+                        [hit[1]],
+                        s=120,
+                        marker="^",
+                        color="tab:green",
+                        label="Schnittpunkt (Pumpenlinie ∩ Löslichkeitsziel)"
+                    )
 
         ax3.legend(loc="best")
 
