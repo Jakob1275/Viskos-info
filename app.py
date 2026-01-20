@@ -1464,12 +1464,11 @@ def run_multi_phase_pump():
                 for T in [temperature - 10, temperature, temperature + 10]:
                     if -10 <= T <= 150:
                         p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
-                        ax3.plot(p_arr, sol_arr, "-", alpha=0.7, color="tab:green",
+                        ax3.plot(p_arr, sol_arr, "-", alpha=0.7,
                                  label=f"Löslichkeit (Luft) @ {T:.0f}°C")
             else:
                 p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
-                ax3.plot(p_arr, sol_arr, "-", color="tab:green",
-                         label=f"Löslichkeit (Luft) @ {temperature:.0f}°C")
+                ax3.plot(p_arr, sol_arr, "-", label=f"Löslichkeit (Luft) @ {temperature:.0f}°C")
                 c_sat_curve_p = p_arr.tolist()
                 c_sat_curve_c = sol_arr.tolist()
 
@@ -1478,21 +1477,20 @@ def run_multi_phase_pump():
                     for T in [temperature - 10, temperature, temperature + 10]:
                         if -10 <= T <= 150:
                             p_arr, sol_arr = solubility_diagonal_curve(g, T, y_gas=y)
-                            ax3.plot(p_arr, sol_arr, "--", alpha=0.35, color="tab:green", label="_nolegend_")
+                            ax3.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
                 else:
                     p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
-                    ax3.plot(p_arr, sol_arr, "--", alpha=0.35, color="tab:green", label="_nolegend_")
+                    ax3.plot(p_arr, sol_arr, "--", alpha=0.35, label="_nolegend_")
         else:
             if show_temp_band:
                 for T in [temperature - 10, temperature, temperature + 10]:
                     if -10 <= T <= 150:
                         p_arr, sol_arr = solubility_diagonal_curve(gas_medium, T, y_gas=1.0)
-                        ax3.plot(p_arr, sol_arr, "--", alpha=0.7, color="tab:green",
+                        ax3.plot(p_arr, sol_arr, "--", alpha=0.7,
                                  label=f"Löslichkeit ({gas_medium}) @ {T:.0f}°C")
             else:
                 p_arr, sol_arr = solubility_diagonal_curve(gas_medium, temperature, y_gas=1.0)
-                ax3.plot(p_arr, sol_arr, "--", color="tab:green",
-                         label=f"Löslichkeit ({gas_medium}) @ {temperature:.0f}°C")
+                ax3.plot(p_arr, sol_arr, "--", label=f"Löslichkeit ({gas_medium}) @ {temperature:.0f}°C")
                 c_sat_curve_p = p_arr.tolist()
                 c_sat_curve_c = sol_arr.tolist()
 
@@ -1502,11 +1500,11 @@ def run_multi_phase_pump():
         ax3.grid(True)
         ax3.set_xlim(0, 14)
 
-        ax3.axhline(C_ziel, linestyle=":", alpha=0.9, color="tab:green", label="C_ziel")
+        ax3.axhline(C_ziel, linestyle=":", alpha=0.9, label="C_ziel")
         ax3.text(13.8, C_ziel, "C_ziel", va="center", ha="right", fontsize=8)
         if show_ref_targets:
             for Cref in [50.0, 100.0, 150.0]:
-                ax3.axhline(Cref, linestyle=":", alpha=0.25, color="tab:green")
+                ax3.axhline(Cref, linestyle=":", alpha=0.25)
                 ax3.text(13.8, Cref, f"{Cref:.0f} Ncm³/L", va="center", ha="right", fontsize=8)
 
         ax3b = ax3.twinx()
