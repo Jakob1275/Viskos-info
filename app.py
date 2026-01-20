@@ -1488,9 +1488,12 @@ def run_multi_phase_pump():
 
         ax3.set_xlabel("Absolutdruck [bar]")
         ax3.set_ylabel("Gasgehalt [Ncm³/L]")
-        ax3.set_title("Löslichkeit + Pumpenkennlinie (gemeinsame y‑Achse)")
+        ax3.set_title("Löslichkeit (Ncm³/L) + Pumpenkennlinie (L/min)")
         ax3.grid(True)
         ax3.set_xlim(0, 14)
+
+        ax3b = ax3.twinx()
+        ax3b.set_ylabel("Gasvolumenstrom [L/min]")
 
         if best_pump and dp_req is not None:
             pump = best_pump["pump"]
@@ -1520,21 +1523,21 @@ def run_multi_phase_pump():
                     (q_gas_lmin * oper_to_norm_ratio(p, temperature, gas_medium)) / max(Q_liq_lmin, 1e-12) * 1000.0
                     for q_gas_lmin, p in zip(Q_gas_lmin, p_abs)
                 ]
-                ax3.plot(p_abs, C_norm_curve, "-", linewidth=2.5, color="tab:red",
-                         label=f"Pumpe (Gasgehalt, GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
+                ax3b.plot(p_abs, Q_gas_lmin, "-", linewidth=2.5, color="tab:red",
+                          label=f"Pumpe (Gasstrom, GVF {gvf_plot:.1f}%, n={n_ratio_sel:.2f}·n0)")
 
                 C_op = (
                     (m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))))
                     * oper_to_norm_ratio(p_suction + best_pump["dp_avail"], temperature, gas_medium)
                     / max(Q_liq_lmin, 1e-12) * 1000.0
                 )
-                ax3.scatter(
+                ax3b.scatter(
                     [p_suction + best_pump["dp_avail"]],
-                    [C_op],
+                    [m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac)))],
                     s=80,
                     color="tab:red",
                     marker="x",
-                    label="Betriebspunkt (Gasgehalt)"
+                    label="Betriebspunkt (Gasstrom)"
                 )
 
                 # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (Ncm³/L)
@@ -1561,10 +1564,21 @@ def run_multi_phase_pump():
                             s=120,
                             marker="^",
                             color="tab:green",
-                            label="Schnittpunkt (Pumpenlinie ∩ Löslichkeit)"
+                            label="Schnittpunkt (Sättigung)"
+                        )
+                        q_hit = safe_interp(hit[0], p_abs, Q_gas_lmin)
+                        ax3b.scatter(
+                            [hit[0]],
+                            [q_hit],
+                            s=90,
+                            marker="^",
+                            color="tab:red",
+                            label="Schnittpunkt (Gasstrom)"
                         )
 
-        ax3.legend(loc="best")
+        handles1, labels1 = ax3.get_legend_handles_labels()
+        handles2, labels2 = ax3b.get_legend_handles_labels()
+        ax3.legend(handles1 + handles2, labels1 + labels2, loc="best")
 
         plt.tight_layout()
         st.pyplot(fig)
@@ -1830,4 +1844,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
