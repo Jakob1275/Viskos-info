@@ -117,7 +117,7 @@ MPH_PUMPS = [
         "id": "MPH-602",
         "type": "Mehrphasenpumpe",
         "Q_max_m3h": 60,
-        "dp_max_bar": 8.4,
+        "dp_max_bar": 8,4,
         "GVF_max": 0.1,
         "n0_rpm": 2900,
         "max_viscosity": 500,
@@ -1587,7 +1587,7 @@ def run_multi_phase_pump():
         handles2, labels2 = ax3b.get_legend_handles_labels()
         ax3.legend(handles1 + handles2, labels1 + labels2, loc="best")
 
-        # --- Solubility + Pump curve (einheitlich Ncm³/L) ---
+        # --- Solubility + Pump curve (einheitlich Ncm³/L, aus Gasstrom umgerechnet) ---
         if gas_medium == "Luft":
             if show_temp_band:
                 for T in [temperature - 10, temperature, temperature + 10]:
@@ -1628,11 +1628,11 @@ def run_multi_phase_pump():
 
         if p_abs_curve and c_norm_curve:
             ax4.plot(p_abs_curve, c_norm_curve, "-", linewidth=2.5, color="tab:red",
-                     label="Pumpe (Gasgehalt, Ncm³/L)")
+                     label="Gasbedarf c_G,req (aus V̇_G, Ncm³/L)")
             p_op = p_suction + float(best_pump["dp_avail"]) if best_pump else None
             if p_op is not None:
                 c_op = safe_interp(p_op, p_abs_curve, c_norm_curve)
-                ax4.scatter([p_op], [c_op], s=80, color="tab:red", marker="x", label="Betriebspunkt (C_op)")
+                ax4.scatter([p_op], [c_op], s=80, color="tab:red", marker="x", label="Betriebspunkt (c_G,req)")
 
             if c_sat_curve_p and c_sat_curve_c:
                 c_sat_at_p = [safe_interp(p, c_sat_curve_p, c_sat_curve_c) for p in p_abs_curve]
@@ -1656,7 +1656,7 @@ def run_multi_phase_pump():
 
         ax4.set_xlabel("Absolutdruck [bar]")
         ax4.set_ylabel("Gasgehalt [Ncm³/L]")
-        ax4.set_title("Löslichkeit + Pumpenkennlinie (einheitlich Ncm³/L)")
+        ax4.set_title("Löslichkeit vs. Gasbedarf (einheitlich Ncm³/L)")
         ax4.grid(True)
         ax4.set_xlim(0, 14)
         ax4.legend()
