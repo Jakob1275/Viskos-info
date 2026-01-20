@@ -1610,11 +1610,12 @@ def run_multi_phase_pump():
                 p_abs = [p_suction + dp for dp in dp_curve_scaled]
                 Q_gas_m3h = [q * (gvf_frac / (1.0 - gvf_frac)) for q in Q_curve_scaled]
                 Q_gas_lmin = [m3h_to_lmin(qg) for qg in Q_gas_m3h]
-                Q_gas_norm_lmin = [q * oper_to_norm_ratio(p, temperature, gas_medium) for q, p in zip(Q_gas_lmin, p_abs)]
+                ratio_suction = oper_to_norm_ratio(p_suction, temperature, gas_medium)
+                Q_gas_norm_lmin = [q * ratio_suction for q in Q_gas_lmin]
                 Q_liq_lmin = m3h_to_lmin(Q_sel)
                 C_norm_curve = [
-                    (q_gas_lmin * oper_to_norm_ratio(p, temperature, gas_medium)) / max(Q_liq_lmin, 1e-12) * 1000.0
-                    for q_gas_lmin, p in zip(Q_gas_lmin, p_abs)
+                    (q_gas_lmin * ratio_suction) / max(Q_liq_lmin, 1e-12) * 1000.0
+                    for q_gas_lmin in Q_gas_lmin
                 ]
                 p_abs_curve = p_abs
                 c_norm_curve = C_norm_curve
@@ -1624,12 +1625,12 @@ def run_multi_phase_pump():
 
                 C_op = (
                     (m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))))
-                    * oper_to_norm_ratio(p_suction + best_pump["dp_avail"], temperature, gas_medium)
+                    * ratio_suction
                     / max(Q_liq_lmin, 1e-12) * 1000.0
                 )
                 ax3.scatter(
                     [p_suction + best_pump["dp_avail"]],
-                    [m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))) * oper_to_norm_ratio(p_suction + best_pump["dp_avail"], temperature, gas_medium)],
+                    [m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))) * ratio_suction],
                     s=80,
                     color="tab:red",
                     marker="x",
