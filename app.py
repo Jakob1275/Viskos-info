@@ -1234,18 +1234,17 @@ def run_multi_phase_pump():
         # =========================
         st.subheader("Ergebnisse")
 
-        r1, r2, r3 = st.columns(3)
+        r1, r2, r3, r4 = st.columns(4)
         with r1:
             st.metric("Saugdruck (fix, Unterdruck)", f"{p_suction:.2f} bar(abs)")
             st.caption("Fix gesetzt, damit Luft eingesogen werden kann.")
         with r2:
             st.metric("Gelöst @ p_s", f"{frac_diss_s:.1f}%")
             st.metric("Frei @ p_s", f"{frac_free_s:.1f}%")
-            if best_pump:
-                Q_sel = float(best_pump["Q_m3h"])
-                st.metric("Gelöst @ p_s [L/min]", f"{cm3N_L_to_lmin(dissolved_s, Q_sel):.2f}")
-                st.metric("Frei @ p_s [L/min]", f"{cm3N_L_to_lmin(free_s, Q_sel):.2f}")
-        with r3:
+        with r3: 
+            st.metric("Gelöst @ p_s [L/min]", f"{cm3N_L_to_lmin(dissolved_s, Q_sel):.2f}")
+            st.metric("Frei @ p_s [L/min]", f"{cm3N_L_to_lmin(free_s, Q_sel):.2f}")
+        with r4:
             if p_req is None:
                 st.warning("p_req nicht erreichbar (0.2…200 bar) – Ziel zu hoch im Modell.")
             else:
