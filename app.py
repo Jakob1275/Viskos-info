@@ -780,8 +780,12 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             gvf_ref_gas = gas_medium
 
         if use_cziel_as_gvf:
-            gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(
-                C_target_cm3N_L, p_suction_bar_abs, T_celsius, gvf_ref_gas
+            ratio_norm = oper_to_norm_ratio(p_suction_bar_abs, T_celsius, gvf_ref_gas)
+            Q_gas_oper_lmin = float(gas_target_norm_lmin) / max(ratio_norm, 1e-12)
+            gvf_s_pct = safe_clamp(
+                (Q_gas_oper_lmin / max(Q_gas_oper_lmin + Q_liq_lmin, 1e-12)) * 100.0,
+                0.0,
+                99.0,
             )
         else:
             gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(free_s, p_suction_bar_abs, T_celsius, gvf_ref_gas)
@@ -1133,9 +1137,9 @@ def run_multi_phase_pump():
                 st.subheader("Optionen")
                 safety_factor = st.slider("Sicherheitsfaktor auf GVF_s [%]", 0, 20, 10)
                 use_cziel_as_gvf = st.checkbox(
-                    "GVF-Kennlinie aus C_ziel (Normvolumen-%)",
+                    "GVF-Kennlinie aus C_ziel (Gasstrom, alles frei)",
                     value=False,
-                    help="Wenn aktiv: C_ziel [L/min] wird physikalisch (über C_ziel in Ncm³/L) in GVF_s an der Saugseite umgerechnet. Kann mit GVF-Interpolation kombiniert werden."
+                    help="Wenn aktiv: Der erforderliche Gasstrom C_ziel [L/min] wird in einen operativen Gasstrom umgerechnet und direkt in eine GVF_s-Kennlinie überführt (ohne Löslichkeitsabzug). Kann mit GVF-Interpolation kombiniert werden."
                 )
                 use_interpolated_gvf = st.checkbox(
                     "GVF interpolieren (zwischen Kennlinien)",
@@ -1231,6 +1235,10 @@ def run_multi_phase_pump():
                 free = max(0.0, float(C_target_cm3N_L) - C_sat)
             return dissolved, free, sat_total
 
+        def cm3N_L_to_lmin(C_cm3N_L, Q_liq_m3h):
+            Q_liq_lmin = m3h_to_lmin(Q_liq_m3h)
+            return (float(C_cm3N_L) / 1000.0) * Q_liq_lmin
+
         # =========================
         # Ergebnisse
         # =========================
@@ -1243,6 +1251,10 @@ def run_multi_phase_pump():
         with r2:
             st.metric("Gelöst @ p_s", f"{frac_diss_s:.1f}%")
             st.metric("Frei @ p_s", f"{frac_free_s:.1f}%")
+            if best_pump:
+                Q_sel = float(best_pump["Q_m3h"])
+                st.metric("Gelöst @ p_s [L/min]", f"{cm3N_L_to_lmin(dissolved_s, Q_sel):.2f}")
+                st.metric("Frei @ p_s [L/min]", f"{cm3N_L_to_lmin(free_s, Q_sel):.2f}")
         with r3:
             st.metric("GVF_s (frei)", f"{gvf_s_pct:.2f}%")
             st.metric("GVF_s (+Sicherheit)", f"{gvf_s_pct_safe:.2f}%")
@@ -1262,6 +1274,7 @@ def run_multi_phase_pump():
             st.success(
                 f"✅ Empfohlene Pumpe: {best_pump['pump']['id']}  |  GVF-Kennlinie {gvf_display} ({gvf_mode}, {gvf_src})"
             )
+            Q_req_sel = float(best_pump["Q_m3h"])
             p1, p2, p3, p4 = st.columns(4)
             with p1:
                 st.metric("Betriebspunkt Q", f"{best_pump['Q_m3h']:.2f} m³/h")
@@ -1272,9 +1285,11 @@ def run_multi_phase_pump():
             with p3:
                 st.metric("Leistung", f"{best_pump['P_req']:.2f} kW")
                 st.metric("Gelöst (Druckseite, möglich)", f"{sat_d:.1f} Ncm³/L")
+                st.metric("Gelöst (Druckseite, möglich) [L/min]", f"{cm3N_L_to_lmin(sat_d, Q_req_sel):.2f}")
             with p4:
                 st.metric("Drehzahl / Modus", f"{best_pump['n_rpm']:.0f} rpm | {best_pump['mode']}")
                 st.metric("Gelöst (Druckseite, vorhanden)", f"{dissolved_d:.1f} Ncm³/L")
+                st.metric("Gelöst (Druckseite, vorhanden) [L/min]", f"{cm3N_L_to_lmin(dissolved_d, Q_req_sel):.2f}")
             
             if "eta_est" in best_pump:
                 st.caption(
@@ -1339,8 +1354,10 @@ def run_multi_phase_pump():
                     a1, a2, a3, a4 = st.columns(4)
                     with a1:
                         st.metric("Gelöst (Druckseite, möglich)", f"{sat_vfd:.1f} Ncm³/L")
+                        st.metric("Gelöst (Druckseite, möglich) [L/min]", f"{cm3N_L_to_lmin(sat_vfd, Q_req_sel):.2f}")
                     with a2:
                         st.metric("Freies Gas (Druckseite)", f"{free_vfd:.1f} Ncm³/L")
+                        st.metric("Freies Gas (Druckseite) [L/min]", f"{cm3N_L_to_lmin(free_vfd, Q_req_sel):.2f}")
                     with a3:
                         st.metric("n angepasst", f"{cand_map['vfd']['n_rpm']:.0f} rpm")
                     with a4:
