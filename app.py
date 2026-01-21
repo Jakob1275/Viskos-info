@@ -787,16 +787,14 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             free_s = max(0.0, float(C_target_cm3N_L) - C_sat_s)
             gvf_ref_gas = gas_medium
 
-        if use_cziel_as_gvf:
-            ratio_norm = oper_to_norm_ratio(p_suction_bar_abs, T_celsius, gvf_ref_gas)
-            Q_gas_oper_lmin = float(gas_target_norm_lmin) / max(ratio_norm, 1e-12)
-            gvf_s_pct = safe_clamp(
-                (Q_gas_oper_lmin / max(Q_gas_oper_lmin + Q_liq_lmin, 1e-12)) * 100.0,
-                0.0,
-                99.0,
-            )
-        else:
-            gvf_s_pct = free_gas_gvf_pct_at_suction_from_cm3N_L(free_s, p_suction_bar_abs, T_celsius, gvf_ref_gas)
+        p_discharge_ref = p_req if p_req is not None else p_suction_bar_abs
+        ratio_norm = oper_to_norm_ratio(p_discharge_ref, T_celsius, gvf_ref_gas)
+        Q_gas_oper_lmin = float(gas_target_norm_lmin) / max(ratio_norm, 1e-12)
+        gvf_s_pct = safe_clamp(
+            (Q_gas_oper_lmin / max(Q_gas_oper_lmin + Q_liq_lmin, 1e-12)) * 100.0,
+            0.0,
+            99.0,
+        )
 
         gvf_s_pct_safe = gvf_s_pct * (1.0 + float(safety_factor_pct) / 100.0)
         if use_interpolated_gvf:
@@ -1139,7 +1137,7 @@ def run_multi_phase_pump():
     - Saugseite FIX: p_s = P_SUCTION_FIXED_BAR_ABS (Unterdruck)
     - p_req (Austritt) so, dass ALLE Einzelgase vollständig gelöst sind (bei Luft: N2+O2)
     - dp_req = p_req - p_s => H_req (physikalisch mit rho)
-    - GVF_s aus FREIEM Gas an Saugseite (gelöst zählt nicht zur GVF)
+    - GVF aus Gesamtgas an der Druckseite (Norm -> operativ bei p_discharge)
     - Q ist NICHT vorgegeben: Betriebspunkt-Q wird aus Kennlinien als optimum bestimmt
     - GVF-Kurven werden interpoliert (8/9/11% möglich)
     - Rechenweg ergänzt
@@ -1490,7 +1488,7 @@ def run_multi_phase_pump():
                 H_m = [dp * BAR_TO_M_LIQ for dp in curve["dp"]]
                 max_Q_lmin = max(max_Q_lmin, max(Q_lmin))
                 max_H = max(max_H, max(H_m))
-                ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"Kennlinie {i}")
+                ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"Kennlinie {i} ({gvf_key:.0f}% Gas)")
 
             if use_interpolated_gvf and gvf_sel <= 30:
                 # Interpolierte GVF-Kurve (BP liegt exakt darauf)
@@ -1505,7 +1503,7 @@ def run_multi_phase_pump():
                     H_interp,
                     "-",
                     linewidth=2.5,
-                    label=f"Betriebskurve (interpoliert, n={n_ratio_sel:.2f}·n0)"
+                    label=f"Betriebskurve (interpoliert, {gvf_sel:.1f}% Gas, n={n_ratio_sel:.2f}·n0)"
                 )
             elif not use_interpolated_gvf and gvf_sel <= 30:
                 # Ausgewählte diskrete GVF-Kurve (BP liegt exakt darauf)
@@ -1518,7 +1516,7 @@ def run_multi_phase_pump():
                         H_sel_curve,
                         "-",
                         linewidth=2.5,
-                        label=f"Betriebskurve (ausgewählt, n={n_ratio_sel:.2f}·n0)"
+                        label=f"Betriebskurve (ausgewählt, {gvf_sel:.0f}% Gas, n={n_ratio_sel:.2f}·n0)"
                     )
 
             ax2.scatter(Q_lmin_sel, H_avail_plot, s=110, marker="x", label="Betriebspunkt (auf Kennlinie)")
@@ -1633,12 +1631,11 @@ def run_multi_phase_pump():
                 p_abs = [p_suction + dp for dp in dp_curve_scaled]
                 Q_gas_m3h = [q * (gvf_frac / (1.0 - gvf_frac)) for q in Q_curve_scaled]
                 Q_gas_lmin = [m3h_to_lmin(qg) for qg in Q_gas_m3h]
-                ratio_suction = oper_to_norm_ratio(p_suction, temperature, gas_medium)
-                Q_gas_norm_lmin = [q * ratio_suction for q in Q_gas_lmin]
+                Q_gas_norm_lmin = [q * oper_to_norm_ratio(p, temperature, gas_medium) for q, p in zip(Q_gas_lmin, p_abs)]
                 Q_liq_lmin = m3h_to_lmin(Q_sel)
                 C_norm_curve = [
-                    (q_gas_lmin * ratio_suction) / max(Q_liq_lmin, 1e-12) * 1000.0
-                    for q_gas_lmin in Q_gas_lmin
+                    (q_gas_lmin * oper_to_norm_ratio(p, temperature, gas_medium)) / max(Q_liq_lmin, 1e-12) * 1000.0
+                    for q_gas_lmin, p in zip(Q_gas_lmin, p_abs)
                 ]
                 p_abs_curve = p_abs
                 c_norm_curve = C_norm_curve
@@ -1648,12 +1645,12 @@ def run_multi_phase_pump():
 
                 C_op = (
                     (m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))))
-                    * ratio_suction
+                    * oper_to_norm_ratio(p_suction + best_pump["dp_avail"], temperature, gas_medium)
                     / max(Q_liq_lmin, 1e-12) * 1000.0
                 )
                 ax3.scatter(
                     [p_suction + best_pump["dp_avail"]],
-                    [m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))) * ratio_suction],
+                    [m3h_to_lmin(Q_sel * (gvf_frac / (1.0 - gvf_frac))) * oper_to_norm_ratio(p_suction + best_pump["dp_avail"], temperature, gas_medium)],
                     s=80,
                     color="tab:red",
                     marker="x",
