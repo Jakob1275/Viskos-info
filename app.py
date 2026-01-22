@@ -643,7 +643,7 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                         n_min_ratio=0.5, n_max_ratio=1.2,
                         w_power=0.5, w_eta=0.3, w_gas=0.2,
                         C_target_cm3N_L=0.0, p_suction_bar_abs=1.0, T_celsius=20.0, gas_medium="Luft",
-                        allow_speed_adjustment=False):
+                        allow_speed_adjustment=False, allow_partial_solution=False):
     """
     Wählt beste Pumpe bei vorgegebenem Q und dp.
     Interpolation zwischen GVF-Kurven (auch 8/9/11% möglich).
@@ -714,7 +714,7 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
             Q_gas_req_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_target_cm3N_L)
 
             for cand in candidates:
-                dp_err = abs(cand["dp_avail"] - dp_req) / max(dp_req, 1e-6)
+                dp_err = 0.0 if dp_req <= 0 else abs(cand["dp_avail"] - dp_req) / max(dp_req, 1e-6)
 
                 P_spec = cand["P_req"] / max(Q_req, 1e-6)
                 P_hyd_kW = (cand["dp_avail"] * BAR_TO_PA) * (Q_req / 3600.0) / 1000.0
@@ -722,9 +722,14 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                 eta_term = 1.0 - eta_est
 
                 p_discharge = float(p_suction_bar_abs) + float(cand["dp_avail"])
-                C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
-                Q_gas_possible_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
-                gas_err = abs(Q_gas_possible_norm_lmin - Q_gas_req_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6)
+                if allow_partial_solution:
+                    Q_gas_oper_lmin = gas_flow_oper_lmin_from_gvf(Q_req, gvf_free_pct)
+                    Q_gas_possible_norm_lmin = Q_gas_oper_lmin * oper_to_norm_ratio(p_discharge, T_celsius, gas_medium)
+                    gas_err = max(0.0, (Q_gas_req_norm_lmin - Q_gas_possible_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
+                else:
+                    C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
+                    Q_gas_possible_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
+                    gas_err = abs(Q_gas_possible_norm_lmin - Q_gas_req_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6)
 
                 score = (
                     float(w_gas) * gas_err +
@@ -750,7 +755,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                               nu_cSt, rho_liq,
                               n_min_ratio=0.5, n_max_ratio=1.2,
                               w_power=0.5, w_eta=0.3, w_gas=0.2,
-                              allow_speed_adjustment=False):
+                              allow_speed_adjustment=False, allow_partial_solution=False):
     """
     Q ist nicht Eingabe: es werden Kandidaten-Q aus Kennlinien geprüft.
     """
@@ -761,16 +766,21 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
         Q_liq_lmin = m3h_to_lmin(Q_req_m3h)
         C_target_cm3N_L = (1000.0 * gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12)
 
-        if gas_medium == "Luft":
-            p_req, targets = pressure_required_for_air_components(T_celsius, C_target_cm3N_L, p_min=0.2, p_max=200.0)
+        if allow_partial_solution:
+            p_req = None
+            targets = {gas_medium: C_target_cm3N_L} if gas_medium != "Luft" else None
+            dp_req = 0.0
         else:
-            p_req = pressure_required_for_C_target(gas_medium, T_celsius, C_target_cm3N_L, y_gas=1.0, p_min=0.2, p_max=200.0)
-            targets = {gas_medium: C_target_cm3N_L}
+            if gas_medium == "Luft":
+                p_req, targets = pressure_required_for_air_components(T_celsius, C_target_cm3N_L, p_min=0.2, p_max=200.0)
+            else:
+                p_req = pressure_required_for_C_target(gas_medium, T_celsius, C_target_cm3N_L, y_gas=1.0, p_min=0.2, p_max=200.0)
+                targets = {gas_medium: C_target_cm3N_L}
 
-        if p_req is None:
-            return None
+            if p_req is None:
+                return None
 
-        dp_req = max(0.0, float(p_req) - float(p_suction_bar_abs))
+            dp_req = max(0.0, float(p_req) - float(p_suction_bar_abs))
 
         dissolved_s = 0.0
         free_s = 0.0
@@ -787,14 +797,17 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             free_s = max(0.0, float(C_target_cm3N_L) - C_sat_s)
             gvf_ref_gas = gas_medium
 
-        p_discharge_ref = p_req if p_req is not None else p_suction_bar_abs
-        ratio_norm = oper_to_norm_ratio(p_discharge_ref, T_celsius, gvf_ref_gas)
-        Q_gas_oper_lmin = float(gas_target_norm_lmin) / max(ratio_norm, 1e-12)
-        gvf_s_pct = safe_clamp(
-            (Q_gas_oper_lmin / max(Q_gas_oper_lmin + Q_liq_lmin, 1e-12)) * 100.0,
-            0.0,
-            99.0,
-        )
+        if allow_partial_solution:
+            gvf_s_pct = 0.0
+        else:
+            p_discharge_ref = p_req if p_req is not None else p_suction_bar_abs
+            ratio_norm = oper_to_norm_ratio(p_discharge_ref, T_celsius, gvf_ref_gas)
+            Q_gas_oper_lmin = float(gas_target_norm_lmin) / max(ratio_norm, 1e-12)
+            gvf_s_pct = safe_clamp(
+                (Q_gas_oper_lmin / max(Q_gas_oper_lmin + Q_liq_lmin, 1e-12)) * 100.0,
+                0.0,
+                99.0,
+            )
 
         gvf_s_pct_safe = gvf_s_pct * (1.0 + float(safety_factor_pct) / 100.0)
         if use_interpolated_gvf:
@@ -839,35 +852,64 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                     if req is None:
                         continue
 
-                    if not use_interpolated_gvf:
-                        req["gvf_curve_pct"] = nearest_gvf_key(pump, req["gvf_s_pct_safe"])
+                    if allow_partial_solution:
+                        gvf_candidates = sorted(pump["curves_dp_vs_Q"].keys())
+                        gvf_candidates = [g for g in gvf_candidates if g <= pump["GVF_max"] * 100.0]
+                        for gvf_c in gvf_candidates:
+                            cand = choose_best_mph_pump(
+                                [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=gvf_c,
+                                nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
+                                w_power=w_power, w_eta=w_eta, w_gas=w_gas,
+                                C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
+                                T_celsius=T_celsius, gas_medium=gas_medium,
+                                allow_speed_adjustment=allow_speed_adjustment,
+                                allow_partial_solution=True
+                            )
+                            if cand is None:
+                                continue
+                            cand.update(req)
+                            cand["gvf_curve_pct"] = float(gvf_c)
 
-                    if req["gvf_curve_pct"] > pump["GVF_max"] * 100.0:
-                        continue
+                            q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
+                            edge_penalty = 0.0
+                            if q_rel < 0.2 or q_rel > 0.9:
+                                edge_penalty = 0.8
 
-                    cand = choose_best_mph_pump(
-                        [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=req["gvf_curve_pct"],
-                        nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
-                        w_power=w_power, w_eta=w_eta, w_gas=w_gas,
-                        C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
-                        T_celsius=T_celsius, gas_medium=gas_medium,
-                        allow_speed_adjustment=allow_speed_adjustment
-                    )
-                    if cand is None:
-                        continue
+                            cand_score = cand["score"] + edge_penalty
+                            cand["score2"] = cand_score
 
-                    cand.update(req)
+                            if best_local is None or cand_score < best_local["score2"]:
+                                best_local = cand
+                    else:
+                        if not use_interpolated_gvf:
+                            req["gvf_curve_pct"] = nearest_gvf_key(pump, req["gvf_s_pct_safe"])
 
-                    q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
-                    edge_penalty = 0.0
-                    if q_rel < 0.2 or q_rel > 0.9:
-                        edge_penalty = 0.8
+                        if req["gvf_curve_pct"] > pump["GVF_max"] * 100.0:
+                            continue
 
-                    cand_score = cand["score"] + edge_penalty
-                    cand["score2"] = cand_score
+                        cand = choose_best_mph_pump(
+                            [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=req["gvf_curve_pct"],
+                            nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
+                            w_power=w_power, w_eta=w_eta, w_gas=w_gas,
+                            C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
+                            T_celsius=T_celsius, gas_medium=gas_medium,
+                            allow_speed_adjustment=allow_speed_adjustment
+                        )
+                        if cand is None:
+                            continue
 
-                    if best_local is None or cand_score < best_local["score2"]:
-                        best_local = cand
+                        cand.update(req)
+
+                        q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
+                        edge_penalty = 0.0
+                        if q_rel < 0.2 or q_rel > 0.9:
+                            edge_penalty = 0.8
+
+                        cand_score = cand["score"] + edge_penalty
+                        cand["score2"] = cand_score
+
+                        if best_local is None or cand_score < best_local["score2"]:
+                            best_local = cand
                 return best_local
 
             best_local = _scan_candidates(Q_candidates)
@@ -1171,6 +1213,11 @@ def run_multi_phase_pump():
                 w_power = st.slider("Gewicht Energie (P)", 0.0, 1.0, 0.5, 0.05)
                 w_eta = st.slider("Gewicht Wirkungsgrad (η)", 0.0, 1.0, 0.3, 0.05)
                 w_gas = st.slider("Gewicht Luftmenge", 0.0, 1.0, 0.2, 0.05)
+                allow_partial_solution = st.checkbox(
+                    "Teilweise Lösung erlauben (GVF-Optimum)",
+                    value=True,
+                    help="Erlaubt freie Gasphase; GVF wird optimal aus Kennlinien gewählt."
+                )
                 show_temp_band = st.checkbox("Temperaturband im Löslichkeitsdiagramm", value=True)
                 show_ref_targets = st.checkbox("Referenzlinien (50/100/150 L/min Norm)", value=True)
                 show_speed_alt = st.checkbox(
@@ -1207,7 +1254,8 @@ def run_multi_phase_pump():
             w_power=w_power_n,
             w_eta=w_eta_n,
             w_gas=w_gas_n,
-            allow_speed_adjustment=False
+            allow_speed_adjustment=False,
+            allow_partial_solution=allow_partial_solution
         )
 
         if best_pump:
