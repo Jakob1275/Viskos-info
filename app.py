@@ -681,35 +681,33 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
 
             candidates = []
 
-            if dp_nom >= dp_req:
-                P_nom, _, _, _ = _P_at_Q_gvf(pump, Q_req, gvf_free_pct)
-                candidates.append({
-                    "pump": pump,
-                    "gvf_key": gvf_free_pct,
-                    "dp_avail": dp_nom,
-                    "P_req": P_nom,
-                    "n_ratio": 1.0,
-                    "n_rpm": pump["n0_rpm"],
-                    "mode": "Nenndrehzahl",
-                    "Q_m3h": Q_req,
-                })
+            P_nom, _, _, _ = _P_at_Q_gvf(pump, Q_req, gvf_free_pct)
+            candidates.append({
+                "pump": pump,
+                "gvf_key": gvf_free_pct,
+                "dp_avail": dp_nom,
+                "P_req": P_nom,
+                "n_ratio": 1.0,
+                "n_rpm": pump["n0_rpm"],
+                "mode": "Nenndrehzahl",
+                "Q_m3h": Q_req,
+            })
 
             if allow_speed_adjustment and n_ratio is not None:
                 Q_base = Q_req / n_ratio
                 dp_scaled = dp_at_ratio(n_ratio)
-                if dp_scaled >= dp_req:
-                    P_base, _, _, _ = _P_at_Q_gvf(pump, Q_base, gvf_free_pct)
-                    P_scaled = P_base * (n_ratio ** 3)
-                    candidates.append({
-                        "pump": pump,
-                        "gvf_key": gvf_free_pct,
-                        "dp_avail": dp_scaled,
-                        "P_req": P_scaled,
-                        "n_ratio": n_ratio,
-                        "n_rpm": pump["n0_rpm"] * n_ratio,
-                        "mode": "Drehzahl angepasst",
-                        "Q_m3h": Q_req,
-                    })
+                P_base, _, _, _ = _P_at_Q_gvf(pump, Q_base, gvf_free_pct)
+                P_scaled = P_base * (n_ratio ** 3)
+                candidates.append({
+                    "pump": pump,
+                    "gvf_key": gvf_free_pct,
+                    "dp_avail": dp_scaled,
+                    "P_req": P_scaled,
+                    "n_ratio": n_ratio,
+                    "n_rpm": pump["n0_rpm"] * n_ratio,
+                    "mode": "Drehzahl angepasst",
+                    "Q_m3h": Q_req,
+                })
 
             Q_gas_req_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_target_cm3N_L)
 
@@ -733,7 +731,8 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
 
                     deficit_sol = max(0.0, (Q_gas_req_norm_lmin - Q_gas_solubility_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
                     deficit_pump = max(0.0, (Q_gas_req_norm_lmin - Q_gas_pump_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
-                    gas_err = gas_err + 2.0 * deficit_sol + 2.0 * deficit_pump
+                    excess_pump = max(0.0, (Q_gas_pump_norm_lmin - Q_gas_solubility_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
+                    gas_err = gas_err + 2.0 * deficit_sol + 2.0 * deficit_pump + 3.0 * excess_pump
                 else:
                     C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                     Q_gas_possible_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
@@ -780,7 +779,10 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             else:
                 p_req = pressure_required_for_C_target(gas_medium, T_celsius, C_target_cm3N_L, y_gas=1.0, p_min=0.2, p_max=200.0)
                 targets = {gas_medium: C_target_cm3N_L}
-            dp_req = 0.0
+            if p_req is None:
+                dp_req = 0.0
+            else:
+                dp_req = max(0.0, float(p_req) - float(p_suction_bar_abs))
         else:
             if gas_medium == "Luft":
                 p_req, targets = pressure_required_for_air_components(T_celsius, C_target_cm3N_L, p_min=0.2, p_max=200.0)
