@@ -924,6 +924,15 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                             Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_liq_m3h, C_sat_total)
 
+                            # Sicherstellen: GVF darf nicht zu klein sein, wenn Zielgasmenge prinzipiell erreichbar ist
+                            Q_total_lmin = m3h_to_lmin(Q_req)
+                            ratio_norm = oper_to_norm_ratio(p_discharge, T_celsius, gas_medium)
+                            Q_gas_oper_target_lmin = float(gas_target_norm_lmin) / max(ratio_norm, 1e-12)
+                            gvf_min_target_pct = safe_clamp((Q_gas_oper_target_lmin / max(Q_total_lmin, 1e-12)) * 100.0, 0.0, 99.0)
+                            if gvf_min_target_pct <= gvf_max_pct:
+                                if gvf_c < gvf_min_target_pct * (1.0 - tol):
+                                    continue
+
                             # In Partial-Solution-Mode: keine harte Filterung,
                             # Bewertung erfolgt rein über die Zielfunktion (gas_err, Leistung, η).
 
@@ -963,6 +972,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             }
 
                             cand.update(req)
+                            # Sicherstellen, dass der tatsächlich geprüfte GVF erhalten bleibt
+                            cand["gvf_curve_pct"] = float(gvf_c)
                             cand["p_req"] = p_discharge
                             cand["dp_req"] = dp_avail
 
