@@ -791,8 +791,10 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
 
     def _calc_requirements_for_Q(Q_req_m3h, gvf_pct=None):
         Q_total_lmin = m3h_to_lmin(Q_req_m3h)
-        Q_liq_lmin = None
-        C_target_cm3N_L = None
+        gvf_frac_local = safe_clamp(float(gvf_pct) / 100.0, 0.0, 0.99) if gvf_pct is not None else 0.0
+        Q_liq_lmin_base = max(Q_total_lmin * (1.0 - gvf_frac_local), 1e-12)
+        Q_liq_lmin = Q_liq_lmin_base
+        C_target_cm3N_L = (1000.0 * gas_target_norm_lmin) / max(Q_liq_lmin_base, 1e-12)
 
         if allow_partial_solution:
             if gas_medium == "Luft":
@@ -814,6 +816,22 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             if p_req is None:
                 return None
 
+            p_discharge_ref = p_req if p_req is not None else p_suction_bar_abs
+            ratio_norm = oper_to_norm_ratio(p_discharge_ref, T_celsius, "Luft" if gas_medium == "Luft" else gas_medium)
+            Q_gas_oper_lmin = float(gas_target_norm_lmin) / max(ratio_norm, 1e-12)
+            Q_liq_lmin = max(Q_total_lmin - Q_gas_oper_lmin, 1e-12)
+            C_target_cm3N_L = (1000.0 * gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12)
+
+            if gas_medium == "Luft":
+                p_req_refined, targets = pressure_required_for_air_components(T_celsius, C_target_cm3N_L, p_min=0.2, p_max=200.0)
+            else:
+                p_req_refined = pressure_required_for_C_target(gas_medium, T_celsius, C_target_cm3N_L, y_gas=1.0, p_min=0.2, p_max=200.0)
+                targets = {gas_medium: C_target_cm3N_L}
+
+            if p_req_refined is None:
+                return None
+
+            p_req = p_req_refined
             dp_req = float(p_req)
 
         dissolved_s = 0.0
@@ -832,11 +850,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             gvf_ref_gas = gas_medium
 
         if allow_partial_solution:
-            if gvf_pct is not None:
-                gvf_frac_local = safe_clamp(float(gvf_pct) / 100.0, 0.0, 0.99)
-                Q_liq_lmin = max(Q_total_lmin * (1.0 - gvf_frac_local), 1e-12)
-            else:
-                Q_liq_lmin = max(Q_total_lmin, 1e-12)
+            Q_liq_lmin = Q_liq_lmin_base
             C_target_cm3N_L = (1000.0 * gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12)
             gvf_s_pct = 0.0
         else:
@@ -925,12 +939,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                             Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_liq_m3h, C_sat_total)
 
-                            if relaxed:
-                                if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
-                                    continue
-                            else:
-                                if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
-                                    continue
+                            # In Partial-Solution-Mode: keine harte Filterung,
+                            # Bewertung erfolgt rein über die Zielfunktion (gas_err, Leistung, η).
 
                             gas_err = abs(Q_gas_pump_norm_lmin - gas_target_norm_lmin) / max(gas_target_norm_lmin, 1e-6)
 
@@ -1403,8 +1413,7 @@ def run_multi_phase_pump():
                 ):
                     best_pump_invalid = True
             elif allow_partial_solution:
-                if Q_gas_pump_norm_chk > Q_gas_solubility_chk * (1.0 + tol):
-                    best_pump_invalid = True
+                best_pump_invalid = False
         else:
             p_req = None
             dp_req = None
