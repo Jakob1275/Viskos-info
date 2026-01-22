@@ -1,116 +1,132 @@
 import math
 import warnings
-from datetime import datetime
+            def _scan_candidates(Q_list, best_local=None):
+                if allow_partial_solution:
+                    gvf_max_pct = min(30.0, pump["GVF_max"] * 100.0)
+                    if use_interpolated_gvf:
+                        gvf_candidates = np.linspace(0.0, gvf_max_pct, 31).tolist()
+                    else:
+                        gvf_candidates = sorted(pump["curves_dp_vs_Q"].keys())
+                    gvf_candidates = [g for g in gvf_candidates if g <= gvf_max_pct]
 
-import numpy as np
-import streamlit as st
-import matplotlib.pyplot as plt
+                    tol = 0.02
+                    for gvf_c in gvf_candidates:
+                        lo_key, hi_key, _ = _interp_between_gvf_keys(pump, gvf_c)
+                        Q_lo = [q for q in pump["curves_dp_vs_Q"][lo_key]["Q"] if q > 0]
+                        Q_hi = [q for q in pump["curves_dp_vs_Q"][hi_key]["Q"] if q > 0]
+                        if not Q_lo or not Q_hi:
+                            continue
+                        qmin_gvf = max(min(Q_lo), min(Q_hi))
+                        qmax_gvf = min(max(Q_lo), max(Q_hi))
+                        if qmax_gvf <= qmin_gvf:
+                            continue
 
-warnings.filterwarnings("ignore", category=UserWarning)
+                        Q_candidates_gvf = np.linspace(qmin_gvf, qmax_gvf, 60)
+                        for Q_req in Q_candidates_gvf:
+                            req = _calc_requirements_for_Q(Q_req)
+                            if req is None:
+                                continue
 
-# =========================
-# Streamlit Config
-# =========================
-st.set_page_config(page_title="Pumpenauslegung", layout="wide", page_icon="🔧")
+                            dp_avail, _, _, _ = _dp_at_Q_gvf(pump, Q_req, gvf_c)
+                            P_req, _, _, _ = _P_at_Q_gvf(pump, Q_req, gvf_c)
+                            p_discharge = float(p_suction_bar_abs) + float(dp_avail)
 
-# =========================
-# Debug
-# =========================
-DEBUG = True
+                            Q_gas_oper_lmin = gas_flow_oper_lmin_from_gvf(Q_req, gvf_c)
+                            Q_gas_pump_norm_lmin = Q_gas_oper_lmin * oper_to_norm_ratio(p_discharge, T_celsius, gas_medium)
+                            C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
+                            Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
 
-def show_error(e: Exception, where: str = ""):
-    st.error(f"❌ Fehler {('in ' + where) if where else ''}: {e}")
-    if DEBUG:
-        import traceback
-        st.code(traceback.format_exc())
+                            if Q_gas_solubility_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
+                                continue
+                            if Q_gas_pump_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
+                                continue
+                            if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
+                                continue
 
-# =========================
-# Konstanten
-# =========================
-G = 9.80665
-R_BAR_L = 0.08314462618
-P_N_BAR = 1.01325
-T_N_K = 273.15
-N0_RPM_DEFAULT = 2900
-BAR_TO_PA = 1e5
+                            gas_err = abs(Q_gas_pump_norm_lmin - gas_target_norm_lmin) / max(gas_target_norm_lmin, 1e-6)
 
-# Mehrphase: feste Saugseite (Unterdruck, damit Luft eingesogen werden kann)
-P_SUCTION_FIXED_BAR_ABS = 0.80  # bar(abs) -> Unterdruck gegenüber 1.013 bar
+                            P_spec = P_req / max(Q_req, 1e-6)
+                            P_hyd_kW = (dp_avail * BAR_TO_PA) * (Q_req / 3600.0) / 1000.0
+                            eta_est = safe_clamp(P_hyd_kW / max(P_req, 1e-9), 0.0, 1.0)
+                            eta_term = 1.0 - eta_est
+                            p_term = dp_avail / max(pump["dp_max_bar"], 1e-9)
 
-# Luft-Zusammensetzung (vereinfachte Hauptanteile)
-AIR_COMPONENTS = [
-    ("Stickstoff aus Gasgemisch", 0.79),
-    ("Sauerstoff aus Gasgemisch", 0.21),
-]
+                            score = (
+                                float(w_gas) * gas_err +
+                                float(w_power) * P_spec +
+                                float(w_eta) * eta_term +
+                                0.05 * p_term
+                            )
 
-# =========================
-# Medien / Gase
-# =========================
-MEDIA = {
-    "Wasser (20°C)": {"rho": 998.0, "nu": 1.0, "p_vapor": 0.0234},
-    "Wasser (60°C)": {"rho": 983.0, "nu": 0.47, "p_vapor": 0.1992},
-    "Glykol 30% (20°C)": {"rho": 1040.0, "nu": 3.5, "p_vapor": 0.01},
-    "Hydrauliköl ISO VG 32 (40°C)": {"rho": 860.0, "nu": 32.0, "p_vapor": 1e-5},
-    "Rohöl (API 30)": {"rho": 876.0, "nu": 10.0, "p_vapor": 0.05},
-}
+                            cand = {
+                                "pump": pump,
+                                "gvf_key": gvf_c,
+                                "gvf_curve_pct": float(gvf_c),
+                                "dp_avail": dp_avail,
+                                "dp_req": dp_avail,
+                                "p_req": p_discharge,
+                                "P_req": P_req,
+                                "n_ratio": 1.0,
+                                "n_rpm": pump["n0_rpm"],
+                                "mode": "Nenndrehzahl",
+                                "Q_m3h": Q_req,
+                                "score": score,
+                                "score2": score,
+                                "eta_est": eta_est,
+                                "gas_err": gas_err,
+                                "dp_err": 0.0,
+                            }
 
-HENRY_CONSTANTS = {
-    "Luft": {"A": 1300.0, "B": 1300, "MW": 28.97},
-    "Methan (CH4)": {"A": 1400.0, "B": 1600, "MW": 16.04},
-    "Ethan (C2H6)": {"A": 800.0, "B": 1800, "MW": 30.07},
-    "Propan (C3H8)": {"A": 500.0, "B": 2000, "MW": 44.10},
-    "CO2": {"A": 29.4, "B": 2400, "MW": 44.01},
-    "H2S": {"A": 10.0, "B": 2100, "MW": 34.08},
-    # Pseudo-Einträge für Luftkomponenten aus Gemisch (nur für Plot/Logik)
-    "Stickstoff aus Gasgemisch": {"A": 1600.0, "B": 1300, "MW": 28.0},
-    "Sauerstoff aus Gasgemisch": {"A": 1200.0, "B": 1300, "MW": 32.0},
-}
+                            cand.update(req)
+                            cand["p_req"] = p_discharge
+                            cand["dp_req"] = dp_avail
 
-# sehr einfache Z-Approximation (nur Stabilität/Trend, kein EOS-Anspruch)
-REAL_GAS_FACTORS = {
-    "Luft": lambda p, T: max(0.85, 1.0 - 0.00008 * p),
-    "Methan (CH4)": lambda p, T: max(0.80, 1.0 - 0.00015 * p),
-    "CO2": lambda p, T: max(0.70, 0.90 + 0.00006 * (T - 273.15)),
-    # Gemischkomponenten -> 1.0 als robuste Näherung
-    "Stickstoff aus Gasgemisch": lambda p, T: 1.0,
-    "Sauerstoff aus Gasgemisch": lambda p, T: 1.0,
-}
+                            q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
+                            edge_penalty = 0.0
+                            if q_rel < 0.2 or q_rel > 0.9:
+                                edge_penalty = 0.8
 
-# =========================
-# Pumpendaten
-# =========================
-PUMPS = [
-    {
-        "id": "P1",
-        "Qw": [0, 10, 20, 30, 40, 50],
-        "Hw": [30, 29, 27, 24, 20, 15],
-        "eta": [0.35, 0.55, 0.65, 0.62, 0.55, 0.45],
-        "Pw": [1.2, 2.8, 4.2, 5.5, 6.5, 7.2],  # Achtung: kann von H/η abweichen (Mess-/Motorwerte etc.)
-        "NPSHr": [1.0, 1.2, 1.5, 2.0, 2.5, 3.0],
-        "max_viscosity": 500,
-        "max_density": 1200,
-    },
-    {
-        "id": "P2",
-        "Qw": [0, 8, 16, 24, 32, 40],
-        "Hw": [36, 35, 33, 30, 26, 20],
-        "eta": [0.30, 0.48, 0.60, 0.63, 0.58, 0.50],
-        "Pw": [1.4, 2.7, 3.9, 5.0, 6.1, 7.4],
-        "NPSHr": [1.1, 1.3, 1.6, 2.1, 2.7, 3.2],
-        "max_viscosity": 600,
-        "max_density": 1200,
-    },
-    {
-        "id": "P3",
-        "Qw": [0, 12, 24, 36, 48, 60],
-        "Hw": [26, 25, 23, 20, 16, 12],
-        "eta": [0.33, 0.52, 0.64, 0.66, 0.60, 0.48],
-        "Pw": [1.1, 2.6, 4.0, 5.6, 7.0, 8.6],
-        "NPSHr": [0.9, 1.1, 1.4, 1.8, 2.3, 2.9],
-        "max_viscosity": 450,
-        "max_density": 1200,
-    },
-]
+                            cand_score = cand["score"] + edge_penalty
+                            cand["score2"] = cand_score
+
+                            if best_local is None or cand_score < best_local["score2"]:
+                                best_local = cand
+                else:
+                    for Q_req in Q_list:
+                        req = _calc_requirements_for_Q(Q_req)
+                        if req is None:
+                            continue
+
+                        if not use_interpolated_gvf:
+                            req["gvf_curve_pct"] = nearest_gvf_key(pump, req["gvf_s_pct_safe"])
+
+                        if req["gvf_curve_pct"] > pump["GVF_max"] * 100.0:
+                            continue
+
+                        cand = choose_best_mph_pump(
+                            [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=req["gvf_curve_pct"],
+                            nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
+                            w_power=w_power, w_eta=w_eta, w_gas=w_gas,
+                            C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
+                            T_celsius=T_celsius, gas_medium=gas_medium,
+                            allow_speed_adjustment=allow_speed_adjustment
+                        )
+                        if cand is None:
+                            continue
+
+                        cand.update(req)
+
+                        q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
+                        edge_penalty = 0.0
+                        if q_rel < 0.2 or q_rel > 0.9:
+                            edge_penalty = 0.8
+
+                        cand_score = cand["score"] + edge_penalty
+                        cand["score2"] = cand_score
+
+                        if best_local is None or cand_score < best_local["score2"]:
+                            best_local = cand
+                return best_local
 
 MPH_PUMPS = [
     {
@@ -860,21 +876,32 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             Q_candidates = np.linspace(qmin, qmax, n_coarse)
 
             def _scan_candidates(Q_list, best_local=None):
-                for Q_req in Q_list:
-                    req = _calc_requirements_for_Q(Q_req)
-                    if req is None:
-                        continue
+                if allow_partial_solution:
+                    gvf_max_pct = min(30.0, pump["GVF_max"] * 100.0)
+                    if use_interpolated_gvf:
+                        gvf_candidates = np.linspace(0.0, gvf_max_pct, 31).tolist()
+                    else:
+                        gvf_candidates = sorted(pump["curves_dp_vs_Q"].keys())
+                    gvf_candidates = [g for g in gvf_candidates if g <= gvf_max_pct]
 
-                    if allow_partial_solution:
-                        gvf_max_pct = min(30.0, pump["GVF_max"] * 100.0)
-                        if use_interpolated_gvf:
-                            gvf_candidates = np.linspace(0.0, gvf_max_pct, 31).tolist()
-                        else:
-                            gvf_candidates = sorted(pump["curves_dp_vs_Q"].keys())
-                        gvf_candidates = [g for g in gvf_candidates if g <= gvf_max_pct]
+                    tol = 0.02
+                    for gvf_c in gvf_candidates:
+                        lo_key, hi_key, _ = _interp_between_gvf_keys(pump, gvf_c)
+                        Q_lo = [q for q in pump["curves_dp_vs_Q"][lo_key]["Q"] if q > 0]
+                        Q_hi = [q for q in pump["curves_dp_vs_Q"][hi_key]["Q"] if q > 0]
+                        if not Q_lo or not Q_hi:
+                            continue
+                        qmin_gvf = max(min(Q_lo), min(Q_hi))
+                        qmax_gvf = min(max(Q_lo), max(Q_hi))
+                        if qmax_gvf <= qmin_gvf:
+                            continue
 
-                        tol = 0.02
-                        for gvf_c in gvf_candidates:
+                        Q_candidates_gvf = np.linspace(qmin_gvf, qmax_gvf, 60)
+                        for Q_req in Q_candidates_gvf:
+                            req = _calc_requirements_for_Q(Q_req)
+                            if req is None:
+                                continue
+
                             dp_avail, _, _, _ = _dp_at_Q_gvf(pump, Q_req, gvf_c)
                             P_req, _, _, _ = _P_at_Q_gvf(pump, Q_req, gvf_c)
                             p_discharge = float(p_suction_bar_abs) + float(dp_avail)
@@ -939,7 +966,12 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
 
                             if best_local is None or cand_score < best_local["score2"]:
                                 best_local = cand
-                    else:
+                else:
+                    for Q_req in Q_list:
+                        req = _calc_requirements_for_Q(Q_req)
+                        if req is None:
+                            continue
+
                         if not use_interpolated_gvf:
                             req["gvf_curve_pct"] = nearest_gvf_key(pump, req["gvf_s_pct_safe"])
 
@@ -1390,7 +1422,38 @@ def run_multi_phase_pump():
             H_req_m = None
         st.subheader("Ergebnisse")
 
+        with st.expander("Debug – Mehrphasen‑Zwischengrößen"):
+            if best_pump:
+                Q_dbg = float(best_pump.get("Q_m3h", 0.0))
+                dp_dbg = float(best_pump.get("dp_avail", 0.0))
+                p_dbg = p_suction + dp_dbg
+                Q_liq_lmin_dbg = m3h_to_lmin(Q_dbg)
+                C_target_dbg = (1000.0 * float(C_ziel_lmin)) / max(Q_liq_lmin_dbg, 1e-12)
+                Q_gas_oper_dbg = gas_flow_oper_lmin_from_gvf(Q_dbg, float(gvf_curve_pct))
+                Q_gas_norm_dbg = Q_gas_oper_dbg * oper_to_norm_ratio(p_dbg, temperature, gas_medium)
+                C_sat_dbg = gas_solubility_total_cm3N_L(gas_medium, p_dbg, temperature)
+                Q_gas_sat_norm_dbg = gas_flow_required_norm_lmin(Q_dbg, C_sat_dbg)
+
+                st.write({
+                    "Q_liq [m³/h]": round(Q_dbg, 3),
+                    "Q_liq [L/min]": round(Q_liq_lmin_dbg, 2),
+                    "Δp [bar]": round(dp_dbg, 3),
+                    "p_abs [bar]": round(p_dbg, 3),
+                    "GVF [%]": round(float(gvf_curve_pct), 2),
+                    "C_ziel [L/min Norm]": round(float(C_ziel_lmin), 2),
+                    "C_target [cm³N/L]": round(C_target_dbg, 2),
+                    "Q_gas_oper [L/min]": round(Q_gas_oper_dbg, 2),
+                    "Q_gas_norm [L/min]": round(Q_gas_norm_dbg, 2),
+                    "C_sat [cm³N/L]": round(C_sat_dbg, 2),
+                    "Q_gas_sat_norm [L/min]": round(Q_gas_sat_norm_dbg, 2),
+                })
+            else:
+                st.info("Kein gültiger Betriebspunkt für Debug‑Ausgabe.")
+
         Q_sel = float(best_pump["Q_m3h"]) if best_pump else None
+        if Q_sel is not None:
+            Q_liq_lmin_sel = m3h_to_lmin(Q_sel)
+            C_target_cm3N_L = (1000.0 * float(C_ziel_lmin)) / max(Q_liq_lmin_sel, 1e-12)
 
         r1, r2, r3, r4 = st.columns(4)
         with r1:
