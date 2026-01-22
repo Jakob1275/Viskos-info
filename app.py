@@ -743,7 +743,7 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                 eta_est = safe_clamp(P_hyd_kW / max(cand["P_req"], 1e-9), 0.0, 1.0)
                 eta_term = 1.0 - eta_est
 
-                p_discharge = float(cand["dp_avail"])
+                p_discharge = float(p_suction_bar_abs) + float(cand["dp_avail"])
                 C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                 Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_liq_req_m3h, C_sat_total)
                 if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
@@ -800,7 +800,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             else:
                 return None
         else:
-            dp_req = float(p_req)
+            dp_req = max(float(p_req) - float(p_suction_bar_abs), 0.0)
 
         dissolved_s = 0.0
         free_s = 0.0
@@ -879,7 +879,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
 
                             dp_avail, _, _, _ = _dp_at_Q_gvf(pump, Q_req, gvf_c)
                             P_req, _, _, _ = _P_at_Q_gvf(pump, Q_req, gvf_c)
-                            p_discharge = float(dp_avail)
+                            p_discharge = float(p_suction_bar_abs) + float(dp_avail)
 
                             Q_liq_m3h = Q_req
                             Q_gas_pump_norm_lmin = gas_flow_norm_lmin_from_conc_pct(Q_liq_m3h, gvf_c)
@@ -1345,7 +1345,7 @@ def run_multi_phase_pump():
 
             Q_chk = float(best_pump.get("Q_m3h", 0.0))
             dp_chk = float(best_pump.get("dp_avail", 0.0))
-            p_dis_chk = dp_chk
+            p_dis_chk = float(p_suction) + dp_chk
             conc_curve_pct = float(gvf_curve_pct)
             conc_curve_frac = safe_clamp(conc_curve_pct / 100.0, 0.0, 1.0)
             Q_liq_chk = Q_chk
@@ -1414,7 +1414,7 @@ def run_multi_phase_pump():
             if best_pump:
                 Q_dbg = float(best_pump.get("Q_m3h", 0.0))
                 dp_dbg = float(best_pump.get("dp_avail", 0.0))
-                p_dbg = dp_dbg
+                p_dbg = float(p_suction) + dp_dbg
                 Q_liq_m3h_dbg = Q_dbg
                 Q_liq_lmin_dbg = m3h_to_lmin(Q_liq_m3h_dbg)
                 C_target_dbg = (1000.0 * float(C_ziel_lmin)) / max(Q_liq_lmin_dbg, 1e-12)
@@ -1426,7 +1426,7 @@ def run_multi_phase_pump():
                     "Q_total [m³/h]": round(Q_dbg, 3),
                     "Q_liq [m³/h]": round(Q_liq_m3h_dbg, 3),
                     "Q_liq [L/min]": round(Q_liq_lmin_dbg, 2),
-                    "p_abs [bar]": round(dp_dbg, 3),
+                    "p_abs [bar]": round(p_dbg, 3),
                     "Konzentration [%]": round(float(gvf_curve_pct), 2),
                     "Q_gas_ziel [L/min Norm]": round(float(C_ziel_lmin), 2),
                     "C_target [cm³N/L]": round(C_target_dbg, 2),
@@ -1468,7 +1468,7 @@ def run_multi_phase_pump():
                 st.metric("Förderhöhe H_req", f"{H_req_m:.1f} m")
 
         if best_pump and dp_req is not None:
-            p_discharge = float(best_pump["dp_avail"])
+            p_discharge = float(p_suction) + float(best_pump["dp_avail"])
             dissolved_d, free_d, sat_d = dissolved_free_at_pressure(p_discharge, C_target_cm3N_L, targets)
             st.success(f"✅ Empfohlene Pumpe: {best_pump['pump']['id']}")
             Q_req_sel = float(best_pump["Q_m3h"])
@@ -1477,7 +1477,7 @@ def run_multi_phase_pump():
             with p1:
                 st.metric("Betriebspunkt Q", f"{best_pump['Q_m3h']:.2f} m³/h")
             with p2:
-                st.metric("p_abs verfügbar", f"{best_pump['dp_avail']:.2f} bar")
+                st.metric("p_abs verfügbar", f"{(p_suction + best_pump['dp_avail']):.2f} bar")
                 if "dp_err" in best_pump:
                     st.metric("p_abs Abweichung", f"{best_pump['dp_err']*100:.1f}%")
             with p3:
@@ -1544,7 +1544,7 @@ def run_multi_phase_pump():
                     saving_pct = ((P_nom - P_vfd) / P_nom * 100.0) if P_nom > 0 else 0.0
 
                     st.markdown("**Drehzahlanpassung (Alternative) – Energievergleich**")
-                    p_discharge_vfd = float(cand_map["vfd"]["dp"])
+                    p_discharge_vfd = float(p_suction) + float(cand_map["vfd"]["dp"])
                     dissolved_vfd, free_vfd, sat_vfd = dissolved_free_at_pressure(p_discharge_vfd, C_target_cm3N_L, targets)
 
                     a1, a2, a3, a4 = st.columns(4)
@@ -1811,7 +1811,7 @@ def run_multi_phase_pump():
             if Q_curve and dp_curve and gvf_plot <= 30:
                 Q_curve_scaled = [q * n_ratio_sel for q in Q_curve]
                 dp_curve_scaled = [dp * (n_ratio_sel ** 2) for dp in dp_curve]
-                p_abs = [dp for dp in dp_curve_scaled]
+                p_abs = [float(p_suction) + dp for dp in dp_curve_scaled]
                 Q_liq_lmin_curve = [m3h_to_lmin(q) for q in Q_curve_scaled]
                 Q_gas_norm_lmin = [q * conc_frac for q in Q_liq_lmin_curve]
                 C_norm_curve = [dissolved_concentration_cm3N_L_from_pct(gvf_plot)] * len(Q_gas_norm_lmin)
@@ -1822,7 +1822,7 @@ def run_multi_phase_pump():
                          label=f"Pumpe (gelöst, n={n_ratio_sel:.2f}·n0)")
 
                 ax3.scatter(
-                    [best_pump["dp_avail"]],
+                    [float(p_suction) + float(best_pump["dp_avail"])],
                     [gas_flow_norm_lmin_from_conc_pct(Q_sel, gvf_plot)],
                     s=80,
                     color="tab:red",
@@ -1913,8 +1913,8 @@ def run_multi_phase_pump():
             if dp_req is None:
                 st.markdown("- p_abs/H_req nicht berechenbar ohne p_req.")
             else:
-                st.latex(r"p_{abs}=p_{req} \quad;\quad H_{req}=\frac{p_{abs}\cdot 10^5}{\rho g}")
-                st.markdown(f"- p_abs = {dp_req:.3f} bar → **H_req = {H_req_m:.2f} m**")
+                st.latex(r"p_{abs}=p_{req} \quad;\quad H_{req}=\frac{\Delta p\cdot 10^5}{\rho g}\;\;\text{mit}\;\Delta p=p_{req}-p_s")
+                st.markdown(f"- p_abs = {p_req:.3f} bar → **H_req = {H_req_m:.2f} m** (mit \u0394p={dp_req:.3f} bar)")
             st.caption("Die Förderhöhe wird physikalisch mit der Flüssigkeitsdichte berechnet.")
 
             st.markdown("---")
@@ -1930,7 +1930,7 @@ def run_multi_phase_pump():
             st.markdown("---")
             st.markdown("### 5) Gasgehalt am Betriebspunkt")
             if best_pump and dp_req is not None:
-                p_discharge = float(best_pump["dp_avail"])
+                p_discharge = float(p_suction) + float(best_pump["dp_avail"])
                 dissolved_d, free_d, sat_d = dissolved_free_at_pressure(p_discharge, C_target_cm3N_L, targets)
                 Q_req_sel = float(best_pump["Q_m3h"])
                 Q_liq_req_sel = Q_req_sel
@@ -1947,12 +1947,12 @@ def run_multi_phase_pump():
                 st.markdown(
                     f"- Auswahl: **{best_pump['pump']['id']}**, "
                     f"Q={best_pump['Q_m3h']:.2f} m³/h, "
-                    f"p_abs_avail={best_pump['dp_avail']:.2f} bar, "
+                    f"p_abs_avail={(p_suction + best_pump['dp_avail']):.2f} bar, "
                     f"P={best_pump['P_req']:.2f} kW, "
                     f"n={best_pump['n_rpm']:.0f} rpm ({best_pump['mode']})"
                 )
                 if dp_req is not None:
-                    st.markdown(f"- Vergleich: p_req={dp_req:.2f} bar ↔ p_abs_avail={best_pump['dp_avail']:.2f} bar")
+                    st.markdown(f"- Vergleich: p_req={p_req:.2f} bar ↔ p_abs_avail={(p_suction + best_pump['dp_avail']):.2f} bar")
             else:
                 st.markdown("- Keine geeignete Pumpe im Datensatz gefunden (oder p_req nicht bestimmbar).")
             st.caption("Die Auswahl minimiert eine gewichtete Zielfunktion; p_abs‑Abweichung wird mitbestraft.")
