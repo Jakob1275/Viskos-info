@@ -726,13 +726,13 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                     C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                     Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
 
-                    dissolved_possible = min(Q_gas_pump_norm_lmin, Q_gas_solubility_norm_lmin)
-                    gas_err = abs(dissolved_possible - Q_gas_req_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6)
+                    tol = 0.02
+                    if Q_gas_solubility_norm_lmin < Q_gas_req_norm_lmin * (1.0 - tol):
+                        continue
+                    if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
+                        continue
 
-                    deficit_sol = max(0.0, (Q_gas_req_norm_lmin - Q_gas_solubility_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
-                    deficit_pump = max(0.0, (Q_gas_req_norm_lmin - Q_gas_pump_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
-                    excess_pump = max(0.0, (Q_gas_pump_norm_lmin - Q_gas_solubility_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
-                    gas_err = gas_err + 2.0 * deficit_sol + 2.0 * deficit_pump + 3.0 * excess_pump
+                    gas_err = abs(Q_gas_pump_norm_lmin - Q_gas_req_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6)
                 else:
                     C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                     Q_gas_possible_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
@@ -866,7 +866,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                         continue
 
                     if allow_partial_solution:
-                        gvf_max_pct = pump["GVF_max"] * 100.0
+                        gvf_max_pct = min(30.0, pump["GVF_max"] * 100.0)
                         if use_interpolated_gvf:
                             gvf_candidates = np.linspace(0.0, gvf_max_pct, 31).tolist()
                         else:
