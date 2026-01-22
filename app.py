@@ -886,6 +886,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
 
                             if Q_gas_solubility_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
                                 continue
+                            if Q_gas_pump_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
+                                continue
                             if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
                                 continue
 
@@ -1315,6 +1317,7 @@ def run_multi_phase_pump():
             allow_partial_solution=allow_partial_solution
         )
 
+        best_pump_invalid = False
         if best_pump:
             p_req = best_pump.get("p_req")
             dp_req = best_pump.get("dp_req")
@@ -1326,6 +1329,22 @@ def run_multi_phase_pump():
             gvf_s_pct_safe = best_pump.get("gvf_s_pct_safe", 0.0)
             gvf_curve_pct = best_pump.get("gvf_curve_pct", 0.0)
             C_target_cm3N_L = best_pump.get("C_target_cm3N_L", 0.0)
+
+            Q_chk = float(best_pump.get("Q_m3h", 0.0))
+            dp_chk = float(best_pump.get("dp_avail", 0.0))
+            p_dis_chk = p_suction + dp_chk
+            Q_gas_oper_chk = gas_flow_oper_lmin_from_gvf(Q_chk, gvf_curve_pct)
+            Q_gas_pump_norm_chk = Q_gas_oper_chk * oper_to_norm_ratio(p_dis_chk, temperature, gas_medium)
+            C_sat_chk = gas_solubility_total_cm3N_L(gas_medium, p_dis_chk, temperature)
+            Q_gas_solubility_chk = gas_flow_required_norm_lmin(Q_chk, C_sat_chk)
+
+            tol = 0.02
+            if (
+                Q_gas_solubility_chk < C_ziel_lmin * (1.0 - tol)
+                or Q_gas_pump_norm_chk < C_ziel_lmin * (1.0 - tol)
+                or Q_gas_pump_norm_chk > Q_gas_solubility_chk * (1.0 + tol)
+            ):
+                best_pump_invalid = True
         else:
             p_req = None
             dp_req = None
@@ -1363,6 +1382,12 @@ def run_multi_phase_pump():
         # =========================
         # Ergebnisse
         # =========================
+        if best_pump_invalid:
+            st.warning("Keine gültige Lösung: C_ziel ist bei der gewählten Pumpe/Druckseite nicht vollständig lösbar.")
+            best_pump = None
+            p_req = None
+            dp_req = None
+            H_req_m = None
         st.subheader("Ergebnisse")
 
         Q_sel = float(best_pump["Q_m3h"]) if best_pump else None
