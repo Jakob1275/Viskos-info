@@ -1,5 +1,4 @@
 import math
-import warnings
 from datetime import datetime
 
 import matplotlib.pyplot as plt
@@ -219,20 +218,6 @@ def gas_flow_oper_lmin_from_gvf(Q_total_m3h, gvf_pct):
     return m3h_to_lmin(Q_gas_m3h)
 
 
-def split_total_flow(Q_total_m3h, gvf_pct):
-    gvf_frac = safe_clamp(float(gvf_pct) / 100.0, 0.0, 0.99)
-    Q_total = float(Q_total_m3h)
-    Q_gas = Q_total * gvf_frac
-    Q_liq = Q_total * (1.0 - gvf_frac)
-    return Q_liq, Q_gas
-
-
-def cm3N_L_from_gvf_pct_at_suction(gvf_pct, p_suction_bar_abs, T_celsius, gas):
-    gvf_frac = safe_clamp(float(gvf_pct) / 100.0, 0.0, 0.99)
-    Vgas_oper_L_per_L = gvf_frac / max(1.0 - gvf_frac, 1e-9)
-    ratio = oper_to_norm_ratio(p_suction_bar_abs, T_celsius, gas)
-    Vn_L_per_L = Vgas_oper_L_per_L * ratio
-    return Vn_L_per_L * 1000.0
 
 
 def motor_iec(P_kW):
@@ -778,7 +763,7 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
 
 
 def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T_celsius, gas_medium,
-                              use_cziel_as_gvf, safety_factor_pct, use_interpolated_gvf,
+                              safety_factor_pct, use_interpolated_gvf,
                               nu_cSt, rho_liq,
                               n_min_ratio=0.5, n_max_ratio=1.2,
                               w_power=0.5, w_eta=0.3, w_gas=0.2,
@@ -1330,7 +1315,6 @@ def run_multi_phase_pump():
             with c3:
                 st.subheader("Optionen")
                 safety_factor = 0.0
-                use_cziel_as_gvf = False
                 use_interpolated_gvf = True
                 st.markdown("**Optimierung (gewichtete Kombination)**")
                 w_power = st.slider("Gewicht Energie (P)", 0.0, 1.0, 0.5, 0.05)
@@ -1369,7 +1353,6 @@ def run_multi_phase_pump():
             p_suction_bar_abs=p_suction,
             T_celsius=temperature,
             gas_medium=gas_medium,
-            use_cziel_as_gvf=use_cziel_as_gvf,
             safety_factor_pct=safety_factor,
             use_interpolated_gvf=use_interpolated_gvf,
             nu_cSt=nu_liq,
@@ -1399,6 +1382,8 @@ def run_multi_phase_pump():
             Q_chk = float(best_pump.get("Q_m3h", 0.0))
             dp_chk = float(best_pump.get("dp_avail", 0.0))
             p_dis_chk = dp_chk
+            gvf_curve_frac = safe_clamp(float(gvf_curve_pct) / 100.0, 0.0, 0.99)
+            Q_liq_chk = Q_chk * (1.0 - gvf_curve_frac)
             Q_gas_oper_chk = gas_flow_oper_lmin_from_gvf(Q_chk, gvf_curve_pct)
             Q_gas_pump_norm_chk = Q_gas_oper_chk * oper_to_norm_ratio(p_dis_chk, temperature, gas_medium)
             C_sat_chk = gas_solubility_total_cm3N_L(gas_medium, p_dis_chk, temperature)
