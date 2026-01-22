@@ -929,10 +929,6 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
                                     continue
                             else:
-                                if Q_gas_solubility_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
-                                    continue
-                                if Q_gas_pump_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
-                                    continue
                                 if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
                                     continue
 
@@ -1399,12 +1395,15 @@ def run_multi_phase_pump():
             Q_gas_solubility_chk = gas_flow_required_norm_lmin(Q_liq_chk, C_sat_chk)
 
             tol = 0.02
-            if solution_status != "partial":
+            if not allow_partial_solution and solution_status != "partial":
                 if (
                     Q_gas_solubility_chk < C_ziel_lmin * (1.0 - tol)
                     or Q_gas_pump_norm_chk < C_ziel_lmin * (1.0 - tol)
                     or Q_gas_pump_norm_chk > Q_gas_solubility_chk * (1.0 + tol)
                 ):
+                    best_pump_invalid = True
+            elif allow_partial_solution:
+                if Q_gas_pump_norm_chk > Q_gas_solubility_chk * (1.0 + tol):
                     best_pump_invalid = True
         else:
             p_req = None
