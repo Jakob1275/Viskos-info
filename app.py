@@ -724,8 +724,16 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                 p_discharge = float(p_suction_bar_abs) + float(cand["dp_avail"])
                 if allow_partial_solution:
                     Q_gas_oper_lmin = gas_flow_oper_lmin_from_gvf(Q_req, gvf_free_pct)
-                    Q_gas_possible_norm_lmin = Q_gas_oper_lmin * oper_to_norm_ratio(p_discharge, T_celsius, gas_medium)
-                    gas_err = max(0.0, (Q_gas_req_norm_lmin - Q_gas_possible_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
+                    Q_gas_pump_norm_lmin = Q_gas_oper_lmin * oper_to_norm_ratio(p_discharge, T_celsius, gas_medium)
+                    C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
+                    Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
+
+                    dissolved_possible = min(Q_gas_pump_norm_lmin, Q_gas_solubility_norm_lmin)
+                    gas_err = abs(dissolved_possible - Q_gas_req_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6)
+
+                    deficit_sol = max(0.0, (Q_gas_req_norm_lmin - Q_gas_solubility_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
+                    deficit_pump = max(0.0, (Q_gas_req_norm_lmin - Q_gas_pump_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6))
+                    gas_err = gas_err + 2.0 * deficit_sol + 2.0 * deficit_pump
                 else:
                     C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                     Q_gas_possible_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
@@ -767,8 +775,11 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
         C_target_cm3N_L = (1000.0 * gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12)
 
         if allow_partial_solution:
-            p_req = None
-            targets = {gas_medium: C_target_cm3N_L} if gas_medium != "Luft" else None
+            if gas_medium == "Luft":
+                p_req, targets = pressure_required_for_air_components(T_celsius, C_target_cm3N_L, p_min=0.2, p_max=200.0)
+            else:
+                p_req = pressure_required_for_C_target(gas_medium, T_celsius, C_target_cm3N_L, y_gas=1.0, p_min=0.2, p_max=200.0)
+                targets = {gas_medium: C_target_cm3N_L}
             dp_req = 0.0
         else:
             if gas_medium == "Luft":
@@ -853,8 +864,12 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                         continue
 
                     if allow_partial_solution:
-                        gvf_candidates = sorted(pump["curves_dp_vs_Q"].keys())
-                        gvf_candidates = [g for g in gvf_candidates if g <= pump["GVF_max"] * 100.0]
+                        gvf_max_pct = pump["GVF_max"] * 100.0
+                        if use_interpolated_gvf:
+                            gvf_candidates = np.linspace(0.0, gvf_max_pct, 31).tolist()
+                        else:
+                            gvf_candidates = sorted(pump["curves_dp_vs_Q"].keys())
+                        gvf_candidates = [g for g in gvf_candidates if g <= gvf_max_pct]
                         for gvf_c in gvf_candidates:
                             cand = choose_best_mph_pump(
                                 [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=gvf_c,
@@ -1185,7 +1200,7 @@ def run_multi_phase_pump():
     - Rechenweg ergänzt
     """
     try:
-        st.header("Mehrphasenpumpen-Auslegung (Q automatisch, Unterdruck Saugseite, vollständige Lösung)")
+        st.header("Mehrphasenpumpen-Auslegung (Q automatisch, Ziel‑Lösung über Druckseite)")
 
         with st.expander("Eingaben – aufklappen", expanded=True):
             c1, c2, c3 = st.columns([1, 1, 1])
@@ -1214,9 +1229,9 @@ def run_multi_phase_pump():
                 w_eta = st.slider("Gewicht Wirkungsgrad (η)", 0.0, 1.0, 0.3, 0.05)
                 w_gas = st.slider("Gewicht Luftmenge", 0.0, 1.0, 0.2, 0.05)
                 allow_partial_solution = st.checkbox(
-                    "Teilweise Lösung erlauben (GVF-Optimum)",
+                    "C_ziel‑Optimierung (Druckseite, GVF‑Scan)",
                     value=True,
-                    help="Erlaubt freie Gasphase; GVF wird optimal aus Kennlinien gewählt."
+                    help="Vergleicht Pumpen‑Gasmenge und chemische Löslichkeit (beides in L/min) und wählt das Optimum zu C_ziel."
                 )
                 show_temp_band = st.checkbox("Temperaturband im Löslichkeitsdiagramm", value=True)
                 show_ref_targets = st.checkbox("Referenzlinien (50/100/150 L/min Norm)", value=True)
