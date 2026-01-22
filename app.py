@@ -189,9 +189,8 @@ def safe_interp(x, xp, fp):
         return fp[-1]
     except Exception:
         return fp[-1] if fp else 0.0
-
-
             gvf_curve_frac = safe_clamp(float(gvf_curve_pct) / 100.0, 0.0, 0.99)
+        
 def m3h_to_lmin(m3h):
     return float(m3h) * 1000.0 / 60.0
 
