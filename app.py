@@ -1270,6 +1270,7 @@ def run_multi_phase_pump():
             if Q_sel is not None:
                 st.metric("Gelöst @ p_s (Norm) [L/min]", f"{cm3N_L_to_lmin(dissolved_s, Q_sel):.2f}")
                 st.metric("Frei @ p_s (Norm) [L/min]", f"{cm3N_L_to_lmin(free_s, Q_sel):.2f}")
+                st.metric("Gasanteil (Druckseite) [%]", f"{gvf_curve_pct:.1f}")
             else:
                 st.info("Kein Q verfügbar (keine Pumpe gefunden).")
         with r3:
