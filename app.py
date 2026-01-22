@@ -189,17 +189,16 @@ def safe_interp(x, xp, fp):
         return fp[-1]
     except Exception:
         return fp[-1] if fp else 0.0
-            gvf_curve_frac = safe_clamp(float(gvf_curve_pct) / 100.0, 0.0, 0.99)
-        
+
+
 def m3h_to_lmin(m3h):
     return float(m3h) * 1000.0 / 60.0
 
 
-            Q_gas_oper_chk = gas_flow_oper_lmin_from_gvf(Q_chk, gvf_curve_pct)
+def gas_flow_required_norm_lmin(Q_liq_m3h, C_target_cm3N_L):
     """
     Ziel-Gasmenge -> Gasvolumenstrom bei Normbedingungen [L/min].
-            Q_liq_chk = Q_chk * (1.0 - gvf_curve_frac)
-            Q_gas_solubility_chk = gas_flow_required_norm_lmin(Q_liq_chk, C_sat_chk)
+    Q_liq_m3h ist der Flüssigkeitsstrom (nicht Gesamtstrom).
     """
     return float(Q_liq_m3h) * float(C_target_cm3N_L) / 60.0
 
@@ -211,7 +210,6 @@ def oper_to_norm_ratio(p_bar_abs, T_celsius, gas):
 
 
 def gas_flow_oper_lmin_from_gvf(Q_total_m3h, gvf_pct):
-            gvf_curve_frac = 0.0
     """
     Gasvolumenstrom (operativ) aus GVF und Gesamtstrom.
     Q_total_m3h = Q_liq + Q_gas.
