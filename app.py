@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 
+st.set_page_config(page_title="Pumpenauslegungstool", layout="wide")
+
 # =========================
 # Config / Globals
 # =========================
@@ -856,7 +858,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             n_coarse = 80
             Q_candidates = np.linspace(qmin, qmax, n_coarse)
 
-            def _scan_candidates(Q_list, best_local=None):
+            def _scan_candidates(Q_list, best_local=None, relaxed=False):
                 if allow_partial_solution:
                     gvf_max_pct = min(30.0, pump["GVF_max"] * 100.0)
                     if use_interpolated_gvf:
@@ -892,12 +894,16 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                             Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
 
-                            if Q_gas_solubility_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
-                                continue
-                            if Q_gas_pump_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
-                                continue
-                            if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
-                                continue
+                            if relaxed:
+                                if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
+                                    continue
+                            else:
+                                if Q_gas_solubility_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
+                                    continue
+                                if Q_gas_pump_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
+                                    continue
+                                if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
+                                    continue
 
                             gas_err = abs(Q_gas_pump_norm_lmin - gas_target_norm_lmin) / max(gas_target_norm_lmin, 1e-6)
 
@@ -931,6 +937,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 "eta_est": eta_est,
                                 "gas_err": gas_err,
                                 "dp_err": 0.0,
+                                "solution_status": "partial" if relaxed else "strict",
                             }
 
                             cand.update(req)
@@ -985,6 +992,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                 return best_local
 
             best_local = _scan_candidates(Q_candidates)
+            if best_local is None and allow_partial_solution:
+                best_local = _scan_candidates(Q_candidates, best_local=None, relaxed=True)
 
             if best_local is not None:
                 step = (qmax - qmin) / max(n_coarse - 1, 1)
@@ -993,7 +1002,11 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                 q_ref_max = min(qmax, q_center + 2.0 * step)
                 if q_ref_max > q_ref_min:
                     Q_refined = np.linspace(q_ref_min, q_ref_max, 60)
-                    best_local = _scan_candidates(Q_refined, best_local)
+                    best_local = _scan_candidates(
+                        Q_refined,
+                        best_local,
+                        relaxed=(best_local.get("solution_status") == "partial")
+                    )
 
             if best_local is not None and (best is None or best_local["score2"] < best["score2"]):
                 best = best_local
@@ -1332,6 +1345,7 @@ def run_multi_phase_pump():
         )
 
         best_pump_invalid = False
+        solution_status = None
         if best_pump:
             p_req = best_pump.get("p_req")
             dp_req = best_pump.get("dp_req")
@@ -1343,6 +1357,7 @@ def run_multi_phase_pump():
             gvf_s_pct_safe = best_pump.get("gvf_s_pct_safe", 0.0)
             gvf_curve_pct = best_pump.get("gvf_curve_pct", 0.0)
             C_target_cm3N_L = best_pump.get("C_target_cm3N_L", 0.0)
+            solution_status = best_pump.get("solution_status")
 
             Q_chk = float(best_pump.get("Q_m3h", 0.0))
             dp_chk = float(best_pump.get("dp_avail", 0.0))
@@ -1353,12 +1368,13 @@ def run_multi_phase_pump():
             Q_gas_solubility_chk = gas_flow_required_norm_lmin(Q_chk, C_sat_chk)
 
             tol = 0.02
-            if (
-                Q_gas_solubility_chk < C_ziel_lmin * (1.0 - tol)
-                or Q_gas_pump_norm_chk < C_ziel_lmin * (1.0 - tol)
-                or Q_gas_pump_norm_chk > Q_gas_solubility_chk * (1.0 + tol)
-            ):
-                best_pump_invalid = True
+            if solution_status != "partial":
+                if (
+                    Q_gas_solubility_chk < C_ziel_lmin * (1.0 - tol)
+                    or Q_gas_pump_norm_chk < C_ziel_lmin * (1.0 - tol)
+                    or Q_gas_pump_norm_chk > Q_gas_solubility_chk * (1.0 + tol)
+                ):
+                    best_pump_invalid = True
         else:
             p_req = None
             dp_req = None
@@ -1403,6 +1419,8 @@ def run_multi_phase_pump():
             dp_req = None
             H_req_m = None
         st.subheader("Ergebnisse")
+        if solution_status == "partial":
+            st.warning("Hinweis: C_ziel ist mit den Kennlinien nicht vollständig lösbar. Es wird die bestmögliche Annäherung angezeigt.")
 
         with st.expander("Debug – Mehrphasen‑Zwischengrößen"):
             if best_pump:
