@@ -872,20 +872,60 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                         else:
                             gvf_candidates = sorted(pump["curves_dp_vs_Q"].keys())
                         gvf_candidates = [g for g in gvf_candidates if g <= gvf_max_pct]
+
+                        tol = 0.02
                         for gvf_c in gvf_candidates:
-                            cand = choose_best_mph_pump(
-                                [pump], Q_req_m3h=Q_req, dp_req_bar=req["dp_req"], gvf_free_pct=gvf_c,
-                                nu_cSt=nu_cSt, rho_liq=rho_liq, n_min_ratio=n_min_ratio, n_max_ratio=n_max_ratio,
-                                w_power=w_power, w_eta=w_eta, w_gas=w_gas,
-                                C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
-                                T_celsius=T_celsius, gas_medium=gas_medium,
-                                allow_speed_adjustment=allow_speed_adjustment,
-                                allow_partial_solution=True
-                            )
-                            if cand is None:
+                            dp_avail, _, _, _ = _dp_at_Q_gvf(pump, Q_req, gvf_c)
+                            P_req, _, _, _ = _P_at_Q_gvf(pump, Q_req, gvf_c)
+                            p_discharge = float(p_suction_bar_abs) + float(dp_avail)
+
+                            Q_gas_oper_lmin = gas_flow_oper_lmin_from_gvf(Q_req, gvf_c)
+                            Q_gas_pump_norm_lmin = Q_gas_oper_lmin * oper_to_norm_ratio(p_discharge, T_celsius, gas_medium)
+                            C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
+                            Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_req, C_sat_total)
+
+                            if Q_gas_solubility_norm_lmin < gas_target_norm_lmin * (1.0 - tol):
                                 continue
+                            if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
+                                continue
+
+                            gas_err = abs(Q_gas_pump_norm_lmin - gas_target_norm_lmin) / max(gas_target_norm_lmin, 1e-6)
+
+                            P_spec = P_req / max(Q_req, 1e-6)
+                            P_hyd_kW = (dp_avail * BAR_TO_PA) * (Q_req / 3600.0) / 1000.0
+                            eta_est = safe_clamp(P_hyd_kW / max(P_req, 1e-9), 0.0, 1.0)
+                            eta_term = 1.0 - eta_est
+                            p_term = dp_avail / max(pump["dp_max_bar"], 1e-9)
+
+                            score = (
+                                float(w_gas) * gas_err +
+                                float(w_power) * P_spec +
+                                float(w_eta) * eta_term +
+                                0.05 * p_term
+                            )
+
+                            cand = {
+                                "pump": pump,
+                                "gvf_key": gvf_c,
+                                "gvf_curve_pct": float(gvf_c),
+                                "dp_avail": dp_avail,
+                                "dp_req": dp_avail,
+                                "p_req": p_discharge,
+                                "P_req": P_req,
+                                "n_ratio": 1.0,
+                                "n_rpm": pump["n0_rpm"],
+                                "mode": "Nenndrehzahl",
+                                "Q_m3h": Q_req,
+                                "score": score,
+                                "score2": score,
+                                "eta_est": eta_est,
+                                "gas_err": gas_err,
+                                "dp_err": 0.0,
+                            }
+
                             cand.update(req)
-                            cand["gvf_curve_pct"] = float(gvf_c)
+                            cand["p_req"] = p_discharge
+                            cand["dp_req"] = dp_avail
 
                             q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
                             edge_penalty = 0.0
