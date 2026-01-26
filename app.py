@@ -1311,8 +1311,7 @@ def run_multi_phase_pump():
         nu_liq = float(MEDIA[liquid_medium]["nu"])
         p_suction = float(P_SUCTION_FIXED_BAR_ABS)
 
-        # Umrechnungsfaktor bar -> m (physikalisch mit rho)
-        BAR_TO_M_LIQ = (BAR_TO_PA) / (rho_liq * G)  # m pro bar
+        # Hinweis: Mehrphasen-Kennlinien werden direkt in bar ausgewertet (ohne Umrechnung in m).
 
         # 1) Pumpenauswahl: Q automatisch (Q_gas_ziel in L/min wird je Kandidat intern umgerechnet)
         best_pump = None
@@ -1343,7 +1342,7 @@ def run_multi_phase_pump():
         if best_pump:
             p_req = best_pump.get("p_req")
             dp_req = best_pump.get("dp_req")
-            H_req_m = dp_req * BAR_TO_M_LIQ if dp_req is not None else None
+            dp_req_bar = dp_req if dp_req is not None else None
             targets = best_pump.get("targets")
             dissolved_s = best_pump.get("dissolved_s", 0.0)
             free_s = best_pump.get("free_s", 0.0)
@@ -1376,7 +1375,7 @@ def run_multi_phase_pump():
         else:
             p_req = None
             dp_req = None
-            H_req_m = None
+            dp_req_bar = None
             targets = None
             dissolved_s = 0.0
             free_s = 0.0
@@ -1415,7 +1414,7 @@ def run_multi_phase_pump():
             best_pump = None
             p_req = None
             dp_req = None
-            H_req_m = None
+            dp_req_bar = None
         st.subheader("Ergebnisse")
         if solution_status == "partial":
             st.warning("Hinweis: Q_gas_ziel ist mit den Kennlinien nicht vollständig lösbar. Es wird die bestmögliche Annäherung angezeigt.")
@@ -1475,7 +1474,7 @@ def run_multi_phase_pump():
                 st.warning("p_req nicht erreichbar (0.2…200 bar) – Ziel zu hoch im Modell.")
             else:
                 st.metric("p_req (Austritt, alle gelöst)", f"{p_req:.2f} bar(abs)")
-                st.metric("Förderhöhe H_req", f"{H_req_m:.1f} m")
+                st.metric("Δp_req", f"{dp_req_bar:.2f} bar")
 
         if best_pump and dp_req is not None:
             p_discharge = float(p_suction) + float(best_pump["dp_avail"])
@@ -1665,8 +1664,8 @@ def run_multi_phase_pump():
             pump = best_pump["pump"]
             Q_sel = float(best_pump["Q_m3h"])
             Q_lmin_sel = m3h_to_lmin(Q_sel)
-            H_req_plot = dp_req * BAR_TO_M_LIQ
-            H_avail_plot = best_pump["dp_avail"] * BAR_TO_M_LIQ
+            H_req_plot = dp_req
+            H_avail_plot = best_pump["dp_avail"]
             gvf_sel = float(gvf_curve_pct)
             n_ratio_sel = float(best_pump.get("n_ratio", 1.0))
 
@@ -1679,7 +1678,7 @@ def run_multi_phase_pump():
                 curve = pump["curves_dp_vs_Q"][gvf_key]
                 Q_curve, dp_curve = align_xy(curve["Q"], curve["dp"])
                 Q_lmin = [m3h_to_lmin(q) for q in Q_curve]
-                H_m = [dp * BAR_TO_M_LIQ for dp in dp_curve]
+                H_m = [float(dp) for dp in dp_curve]
                 max_Q_lmin = max(max_Q_lmin, max(Q_lmin))
                 max_H = max(max_H, max(H_m))
                 ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"Kennlinie {i} ({gvf_key:.0f}% gelöst)")
@@ -1691,7 +1690,7 @@ def run_multi_phase_pump():
                 Q_interp = list(map(float, base_curve["Q"]))
                 dp_interp = [_dp_at_Q_gvf(pump, q, gvf_sel)[0] for q in Q_interp]
                 Q_interp_scaled = [q * n_ratio_sel for q in Q_interp]
-                H_interp = [dp * (n_ratio_sel ** 2) * BAR_TO_M_LIQ for dp in dp_interp]
+                H_interp = [dp * (n_ratio_sel ** 2) for dp in dp_interp]
                 ax2.plot(
                     [m3h_to_lmin(q) for q in Q_interp_scaled],
                     H_interp,
@@ -1705,7 +1704,7 @@ def run_multi_phase_pump():
                 if sel_curve:
                     Q_curve, dp_curve = align_xy(sel_curve["Q"], sel_curve["dp"])
                     Q_sel_curve = [q * n_ratio_sel for q in Q_curve]
-                    H_sel_curve = [dp * (n_ratio_sel ** 2) * BAR_TO_M_LIQ for dp in dp_curve]
+                    H_sel_curve = [dp * (n_ratio_sel ** 2) for dp in dp_curve]
                     ax2.plot(
                         [m3h_to_lmin(q) for q in Q_sel_curve],
                         H_sel_curve,
@@ -1717,7 +1716,7 @@ def run_multi_phase_pump():
             ax2.scatter(Q_lmin_sel, H_avail_plot, s=110, marker="x", label="Betriebspunkt (auf Kennlinie)")
             ax2.scatter(Q_lmin_sel, H_req_plot, s=70, marker="o", facecolors="none", edgecolors="black", label="Anforderung (p_req)")
             ax2.set_xlabel("Volumenstrom [L/min]")
-            ax2.set_ylabel("Förderhöhe [m]")
+            ax2.set_ylabel("Δp [bar]")
             ax2.set_title(f"Mehrphasen-Kennlinien: {pump['id']}")
             ax2.grid(True)
             ax2.legend()
@@ -1726,7 +1725,7 @@ def run_multi_phase_pump():
         else:
             ax2.text(0.5, 0.5, "Keine geeignete Pumpe / kein p_req", ha="center", va="center", transform=ax2.transAxes)
             ax2.set_xlabel("Volumenstrom [L/min]")
-            ax2.set_ylabel("Förderhöhe [m]")
+            ax2.set_ylabel("Δp [bar]")
             ax2.set_title("Mehrphasen-Kennlinien")
             ax2.grid(True)
 
@@ -1899,7 +1898,7 @@ def run_multi_phase_pump():
                 Q_liq_lmin = m3h_to_lmin(best_pump["Q_m3h"])
                 st.markdown(f"- Flüssigkeitsstrom: **{Q_liq_lmin:.1f} L/min**")
             st.markdown(f"- **Gas:** {gas_medium} | **Medium:** {liquid_medium} | **T:** {temperature:.1f} °C")
-            st.markdown(f"- **Umrechnung bar→m:** \(H=\\Delta p/(\\rho g)\) ⇒ 1 bar = {BAR_TO_M_LIQ:.2f} m (bei ρ={rho_liq:.0f} kg/m³)")
+            st.markdown("- **Mehrphase:** Kennlinien und Vergleich direkt in Δp [bar] (ohne Umrechnung in m).")
             st.caption("Alle Drücke sind Absolutdrücke.")
 
             st.markdown("---")
@@ -1925,13 +1924,13 @@ def run_multi_phase_pump():
             st.caption("$p_{req}$ ist der Druck, bei dem das Zielgas vollständig löslich wäre.")
 
             st.markdown("---")
-            st.markdown("### 3) Druckhub & Förderhöhe")
+            st.markdown("### 3) Druckhub (Δp)")
             if dp_req is None:
                 st.markdown("- p_abs/H_req nicht berechenbar ohne p_req.")
             else:
-                st.latex(r"p_{abs}=p_{req} \quad;\quad H_{req}=\frac{\Delta p\cdot 10^5}{\rho g}\;\;\text{mit}\;\Delta p=p_{req}-p_s")
-                st.markdown(f"- p_abs = {p_req:.3f} bar → **H_req = {H_req_m:.2f} m** (mit \u0394p={dp_req:.3f} bar)")
-            st.caption("Die Förderhöhe wird physikalisch mit der Flüssigkeitsdichte berechnet.")
+                st.latex(r"p_{abs}=p_{req} \quad;\quad \Delta p=p_{req}-p_s")
+                st.markdown(f"- p_abs = {p_req:.3f} bar → **Δp = {dp_req:.3f} bar**")
+            st.caption("Im Mehrphasenvergleich wird direkt mit Δp in bar gearbeitet.")
 
             st.markdown("---")
             st.markdown("### 4) Freies Gas an der Saugseite")
