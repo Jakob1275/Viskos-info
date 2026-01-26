@@ -44,6 +44,16 @@ AIR_SOLUBILITY_REF_TABLE = [
     (10.0, 185.0),
 ]
 
+MAPPE10_MPH_AIR_LMIN = {
+    "MPH-603": {
+        15.0: {
+            "p_abs": [4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5],
+            "gas_lmin": [96.9, 93.75, 90.3, 87.45, 81.15, 75.0, 67.5, 59.25, 49.95, 40.2, 25.05],
+            "solubility_lmin": [82.8, 92.0, 101.2, 110.4, 119.6, 128.8, 138.0, 147.2, 156.4, 165.6, 177.0],
+        },
+    },
+}
+
 MEDIA = {
     "Wasser": {"rho": 998.0, "nu": 1.0},
     "Öl (leicht)": {"rho": 850.0, "nu": 10.0},
@@ -95,6 +105,20 @@ def air_solubility_cm3N_L(p_bar_abs, T_celsius):
     for g, y in AIR_COMPONENTS:
         total += gas_solubility_cm3N_per_L(g, p_bar_abs, T_celsius, y_gas=y)
     return total * float(air_solubility_correction(p_bar_abs, T_celsius))
+
+
+def mappe10_air_lmin_lookup(pump_id, gvf_pct, p_abs_bar, kind):
+    pump_map = MAPPE10_MPH_AIR_LMIN.get(pump_id)
+    if not pump_map:
+        return None, None
+    keys = sorted(pump_map.keys())
+    if not keys:
+        return None, None
+    gvf_sel = min(keys, key=lambda k: abs(float(k) - float(gvf_pct)))
+    curve = pump_map.get(gvf_sel)
+    if not curve or kind not in curve:
+        return None, gvf_sel
+    return safe_interp(float(p_abs_bar), curve["p_abs"], curve[kind]), gvf_sel
 
 
 def show_error(e, context):
@@ -818,6 +842,14 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                 p_discharge = float(p_suction_bar_abs) + float(cand["dp_avail"])
                 C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                 Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_liq_req_m3h, C_sat_total)
+
+                if gas_medium == "Luft":
+                    mappe_gas_lmin, _ = mappe10_air_lmin_lookup(pump["id"], gvf_free_pct, p_discharge, "gas_lmin")
+                    mappe_sat_lmin, _ = mappe10_air_lmin_lookup(pump["id"], gvf_free_pct, p_discharge, "solubility_lmin")
+                    if mappe_gas_lmin is not None:
+                        Q_gas_pump_norm_lmin = float(mappe_gas_lmin)
+                    if mappe_sat_lmin is not None:
+                        Q_gas_solubility_norm_lmin = float(mappe_sat_lmin)
                 sat_excess = max(0.0, Q_gas_pump_norm_lmin - Q_gas_solubility_norm_lmin)
                 sat_err = sat_excess / max(Q_gas_pump_norm_lmin, 1e-6)
                 if (not allow_partial_solution) and (sat_err > tol):
@@ -969,6 +1001,14 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             Q_gas_pump_norm_lmin = gas_flow_norm_lmin_from_conc_pct(Q_liq_m3h, gvf_c)
                             C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                             Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_liq_m3h, C_sat_total)
+
+                            if gas_medium == "Luft":
+                                mappe_gas_lmin, _ = mappe10_air_lmin_lookup(pump["id"], gvf_c, p_discharge, "gas_lmin")
+                                mappe_sat_lmin, _ = mappe10_air_lmin_lookup(pump["id"], gvf_c, p_discharge, "solubility_lmin")
+                                if mappe_gas_lmin is not None:
+                                    Q_gas_pump_norm_lmin = float(mappe_gas_lmin)
+                                if mappe_sat_lmin is not None:
+                                    Q_gas_solubility_norm_lmin = float(mappe_sat_lmin)
 
                             # In Partial-Solution-Mode: Bewertung über lösbare Gasmenge
                             sat_excess = max(0.0, Q_gas_pump_norm_lmin - Q_gas_solubility_norm_lmin)
@@ -1507,6 +1547,16 @@ def run_multi_phase_pump():
                 Q_gas_norm_dbg = gas_flow_norm_lmin_from_conc_pct(Q_liq_m3h_dbg, float(gvf_curve_pct))
                 C_sat_dbg = gas_solubility_total_cm3N_L(gas_medium, p_dbg, temperature)
                 Q_gas_sat_norm_dbg = gas_flow_required_norm_lmin(Q_liq_m3h_dbg, C_sat_dbg)
+
+                if gas_medium == "Luft" and best_pump:
+                    mappe_gas_lmin, _ = mappe10_air_lmin_lookup(best_pump["pump"]["id"], gvf_curve_pct, p_dbg, "gas_lmin")
+                    mappe_sat_lmin, _ = mappe10_air_lmin_lookup(best_pump["pump"]["id"], gvf_curve_pct, p_dbg, "solubility_lmin")
+                    if mappe_gas_lmin is not None:
+                        Q_gas_norm_dbg = float(mappe_gas_lmin)
+                    if mappe_sat_lmin is not None:
+                        Q_gas_sat_norm_dbg = float(mappe_sat_lmin)
+                        if Q_liq_m3h_dbg > 0:
+                            C_sat_dbg = (Q_gas_sat_norm_dbg * 60.0) / float(Q_liq_m3h_dbg)
 
                 st.write({
                     "Q_total [m³/h]": round(Q_dbg, 3),
