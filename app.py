@@ -190,6 +190,16 @@ def safe_interp(x, xp, fp):
         return fp[-1] if fp else 0.0
 
 
+def align_xy(x_vals, y_vals):
+    try:
+        x_list = list(x_vals)
+        y_list = list(y_vals)
+        n = min(len(x_list), len(y_list))
+        return x_list[:n], y_list[:n]
+    except Exception:
+        return list(x_vals), list(y_vals)
+
+
 def m3h_to_lmin(m3h):
     return float(m3h) * 1000.0 / 60.0
 
@@ -1667,8 +1677,9 @@ def run_multi_phase_pump():
                 if gvf_key > 30:
                     continue
                 curve = pump["curves_dp_vs_Q"][gvf_key]
-                Q_lmin = [m3h_to_lmin(q) for q in curve["Q"]]
-                H_m = [dp * BAR_TO_M_LIQ for dp in curve["dp"]]
+                Q_curve, dp_curve = align_xy(curve["Q"], curve["dp"])
+                Q_lmin = [m3h_to_lmin(q) for q in Q_curve]
+                H_m = [dp * BAR_TO_M_LIQ for dp in dp_curve]
                 max_Q_lmin = max(max_Q_lmin, max(Q_lmin))
                 max_H = max(max_H, max(H_m))
                 ax2.plot(Q_lmin, H_m, "--", alpha=0.5, label=f"Kennlinie {i} ({gvf_key:.0f}% gelöst)")
@@ -1692,8 +1703,9 @@ def run_multi_phase_pump():
                 # Ausgewählte diskrete Konzentrations-Kurve (BP liegt exakt darauf)
                 sel_curve = pump["curves_dp_vs_Q"].get(gvf_sel)
                 if sel_curve:
-                    Q_sel_curve = [q * n_ratio_sel for q in sel_curve["Q"]]
-                    H_sel_curve = [dp * (n_ratio_sel ** 2) * BAR_TO_M_LIQ for dp in sel_curve["dp"]]
+                    Q_curve, dp_curve = align_xy(sel_curve["Q"], sel_curve["dp"])
+                    Q_sel_curve = [q * n_ratio_sel for q in Q_curve]
+                    H_sel_curve = [dp * (n_ratio_sel ** 2) * BAR_TO_M_LIQ for dp in dp_curve]
                     ax2.plot(
                         [m3h_to_lmin(q) for q in Q_sel_curve],
                         H_sel_curve,
@@ -1805,8 +1817,12 @@ def run_multi_phase_pump():
                 dp_curve = [_dp_at_Q_gvf(pump, q, gvf_plot)[0] for q in Q_curve]
             else:
                 sel_curve = pump["curves_dp_vs_Q"].get(gvf_plot)
-                Q_curve = list(map(float, sel_curve["Q"])) if sel_curve else []
-                dp_curve = list(map(float, sel_curve["dp"])) if sel_curve else []
+                if sel_curve:
+                    Q_curve, dp_curve = align_xy(sel_curve["Q"], sel_curve["dp"])
+                    Q_curve = list(map(float, Q_curve))
+                    dp_curve = list(map(float, dp_curve))
+                else:
+                    Q_curve, dp_curve = [], []
 
             if Q_curve and dp_curve and gvf_plot <= 30:
                 Q_curve_scaled = [q * n_ratio_sel for q in Q_curve]
