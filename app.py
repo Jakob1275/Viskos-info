@@ -21,6 +21,7 @@ R_BAR_L = 0.08314
 N0_RPM_DEFAULT = 2900
 P_SUCTION_FIXED_BAR_ABS = 0.6
 SAT_PENALTY_WEIGHT = 1.5
+AIR_SOLUBILITY_CORRECTION = 1.27
 
 MEDIA = {
     "Wasser": {"rho": 998.0, "nu": 1.0},
@@ -567,10 +568,13 @@ def pressure_required_for_air_components(T_celsius, C_total_cm3N_L, p_min=0.2, p
     targets = {}
     p_reqs = []
 
+    corr = max(float(AIR_SOLUBILITY_CORRECTION), 1e-9)
+
     for gas_i, y in AIR_COMPONENTS:
         C_i = float(C_total_cm3N_L) * float(y)
         targets[gas_i] = C_i
-        p_i = pressure_required_for_C_target(gas_i, T_celsius, C_i, y_gas=y, p_min=p_min, p_max=p_max)
+        C_i_adj = C_i / corr
+        p_i = pressure_required_for_C_target(gas_i, T_celsius, C_i_adj, y_gas=y, p_min=p_min, p_max=p_max)
         if p_i is None:
             return None, targets
         p_reqs.append(p_i)
@@ -665,7 +669,7 @@ def gas_solubility_total_cm3N_L(gas_medium, p_bar_abs, T_celsius):
         total = 0.0
         for g, y in AIR_COMPONENTS:
             total += gas_solubility_cm3N_per_L(g, p_bar_abs, T_celsius, y_gas=y)
-        return total
+        return total * float(AIR_SOLUBILITY_CORRECTION)
     return gas_solubility_cm3N_per_L(gas_medium, p_bar_abs, T_celsius, y_gas=1.0)
 
 
@@ -821,7 +825,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
         if gas_medium == "Luft":
             for g, y in AIR_COMPONENTS:
                 C_i = targets.get(g, float(C_target_cm3N_L) * float(y))
-                C_sat_i = gas_solubility_cm3N_per_L(g, p_suction_bar_abs, T_celsius, y_gas=y)
+                C_sat_i = gas_solubility_cm3N_per_L(g, p_suction_bar_abs, T_celsius, y_gas=y) * float(AIR_SOLUBILITY_CORRECTION)
                 dissolved_s += min(C_i, C_sat_i)
                 free_s += max(0.0, C_i - C_sat_i)
         else:
@@ -1408,7 +1412,7 @@ def run_multi_phase_pump():
             if gas_medium == "Luft":
                 for g, y in AIR_COMPONENTS:
                     C_i = targets_local.get(g, float(C_target_cm3N_L) * float(y)) if targets_local else float(C_target_cm3N_L) * float(y)
-                    C_sat_i = gas_solubility_cm3N_per_L(g, p_abs_bar, temperature, y_gas=y)
+                    C_sat_i = gas_solubility_cm3N_per_L(g, p_abs_bar, temperature, y_gas=y) * float(AIR_SOLUBILITY_CORRECTION)
                     sat_total += C_sat_i
                     dissolved += min(C_i, C_sat_i)
                     free += max(0.0, C_i - C_sat_i)
