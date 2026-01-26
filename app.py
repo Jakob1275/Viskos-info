@@ -975,6 +975,9 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             sat_err = sat_excess / max(Q_gas_pump_norm_lmin, 1e-6)
                             gas_err = abs(Q_gas_pump_norm_lmin - gas_target_norm_lmin) / max(gas_target_norm_lmin, 1e-6)
 
+                            dp_req_local = float(req.get("dp_req", 0.0))
+                            dp_err = 0.0 if dp_req_local <= 0 else abs(float(dp_avail) - dp_req_local) / max(dp_req_local, 1e-6)
+
                             P_spec = P_req / max(Q_req, 1e-6)
                             P_hyd_kW = (dp_avail * BAR_TO_PA) * (Q_req / 3600.0) / 1000.0
                             eta_est = safe_clamp(P_hyd_kW / max(P_req, 1e-9), 0.0, 1.0)
@@ -986,6 +989,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 float(w_power) * P_spec +
                                 float(w_eta) * eta_term +
                                 float(SAT_PENALTY_WEIGHT) * sat_err +
+                                3.0 * dp_err +
                                 0.05 * p_term
                             )
 
@@ -994,8 +998,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 "gvf_key": gvf_c,
                                 "gvf_curve_pct": float(gvf_c),
                                 "dp_avail": dp_avail,
-                                "dp_req": dp_avail,
-                                "p_req": p_discharge,
+                                "dp_req": dp_req_local,
+                                "p_req": req.get("p_req"),
                                 "P_req": P_req,
                                 "n_ratio": 1.0,
                                 "n_rpm": pump["n0_rpm"],
@@ -1005,15 +1009,15 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 "score2": score,
                                 "eta_est": eta_est,
                                 "gas_err": gas_err,
-                                "dp_err": 0.0,
+                                "dp_err": dp_err,
                                 "solution_status": "partial" if relaxed else "strict",
                             }
 
                             cand.update(req)
                             # Sicherstellen, dass der tatsächlich geprüfte GVF erhalten bleibt
                             cand["gvf_curve_pct"] = float(gvf_c)
-                            cand["p_req"] = p_discharge
-                            cand["dp_req"] = dp_avail
+                            cand["p_req"] = req.get("p_req")
+                            cand["dp_req"] = dp_req_local
 
                             q_rel = Q_req / max(pump["Q_max_m3h"], 1e-9)
                             edge_penalty = 0.0
