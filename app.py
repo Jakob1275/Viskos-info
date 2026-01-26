@@ -21,9 +21,26 @@ R_BAR_L = 0.08314
 N0_RPM_DEFAULT = 2900
 P_SUCTION_FIXED_BAR_ABS = 0.6
 SAT_PENALTY_WEIGHT = 1.5
-AIR_SOLUBILITY_REF_P_BAR = 5.0
 AIR_SOLUBILITY_REF_T_C = 20.0
-AIR_SOLUBILITY_REF_C_CM3N_L = 122.7
+AIR_SOLUBILITY_REF_TABLE = [
+    (2.0, 36.8),
+    (2.5, 46.0),
+    (3.0, 55.2),
+    (3.5, 64.4),
+    (4.0, 73.6),
+    (4.5, 82.8),
+    (5.0, 92.0),
+    (5.5, 101.2),
+    (6.0, 110.4),
+    (6.5, 119.6),
+    (7.0, 128.8),
+    (7.5, 138.0),
+    (8.0, 147.2),
+    (8.5, 156.4),
+    (9.0, 165.6),
+    (9.5, 177.0),
+    (10.0, 185.0),
+]
 
 MEDIA = {
     "Wasser": {"rho": 998.0, "nu": 1.0},
@@ -51,16 +68,28 @@ REAL_GAS_FACTORS = {
 }
 
 
-def air_solubility_correction(T_celsius):
+def air_solubility_correction(p_bar_abs, T_celsius):
     try:
         base = 0.0
         for g, y in AIR_COMPONENTS:
-            base += gas_solubility_cm3N_per_L(g, AIR_SOLUBILITY_REF_P_BAR, AIR_SOLUBILITY_REF_T_C, y_gas=y)
+            base += gas_solubility_cm3N_per_L(g, p_bar_abs, AIR_SOLUBILITY_REF_T_C, y_gas=y)
         if base <= 0:
             return 1.0
-        return float(AIR_SOLUBILITY_REF_C_CM3N_L) / float(base)
+        p_vals = [p for p, _ in AIR_SOLUBILITY_REF_TABLE]
+        c_vals = [c for _, c in AIR_SOLUBILITY_REF_TABLE]
+        ref = safe_interp(float(p_bar_abs), p_vals, c_vals)
+        if ref <= 0:
+            return 1.0
+        return float(ref) / float(base)
     except Exception:
         return 1.0
+
+
+def air_solubility_cm3N_L(p_bar_abs, T_celsius):
+    total = 0.0
+    for g, y in AIR_COMPONENTS:
+        total += gas_solubility_cm3N_per_L(g, p_bar_abs, T_celsius, y_gas=y)
+    return total * float(air_solubility_correction(p_bar_abs, T_celsius))
 
 
 def show_error(e, context):
@@ -539,6 +568,12 @@ def solubility_diagonal_curve(gas, T_celsius, y_gas=1.0, p_min=0.2, p_max=14.0, 
     return ps, np.array(sol)
 
 
+def solubility_diagonal_curve_air_corrected(T_celsius, p_min=0.2, p_max=14.0, n=140):
+    ps = np.linspace(p_min, p_max, n)
+    sol = [air_solubility_cm3N_L(p, T_celsius) for p in ps]
+    return ps, np.array(sol)
+
+
 def pressure_required_for_C_target(gas, T_celsius, C_target_cm3N_L, y_gas=1.0, p_min=0.2, p_max=200.0):
     """
     Finde p_abs, so dass C_sat(p,T) ≈ C_target (bisection).
@@ -579,21 +614,27 @@ def pressure_required_for_air_components(T_celsius, C_total_cm3N_L, p_min=0.2, p
     Luft wird als N2/O2 betrachtet. Ziel ist vollständiges Lösen ALLER Komponenten.
     Dazu wird je Komponente der erforderliche Druck berechnet und p_req = max(p_req_i) genommen.
     """
-    targets = {}
-    p_reqs = []
+    targets = {gas_i: float(C_total_cm3N_L) * float(y) for gas_i, y in AIR_COMPONENTS}
 
-    corr = max(float(air_solubility_correction(T_celsius)), 1e-9)
+    def f(p):
+        return air_solubility_cm3N_L(p, T_celsius) - float(C_total_cm3N_L)
 
-    for gas_i, y in AIR_COMPONENTS:
-        C_i = float(C_total_cm3N_L) * float(y)
-        targets[gas_i] = C_i
-        C_i_adj = C_i / corr
-        p_i = pressure_required_for_C_target(gas_i, T_celsius, C_i_adj, y_gas=y, p_min=p_min, p_max=p_max)
-        if p_i is None:
-            return None, targets
-        p_reqs.append(p_i)
-
-    return max(p_reqs) if p_reqs else None, targets
+    lo, hi = float(p_min), float(p_max)
+    flo, fhi = f(lo), f(hi)
+    if flo >= 0:
+        return lo, targets
+    if fhi < 0:
+        return None, targets
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        fm = f(mid)
+        if abs(fm) < 1e-3:
+            return mid, targets
+        if fm >= 0:
+            hi = mid
+        else:
+            lo = mid
+    return 0.5 * (lo + hi), targets
 
 
 # =========================
@@ -680,10 +721,7 @@ def _P_at_Q_gvf(pump, Q_m3h, gvf_pct):
 
 def gas_solubility_total_cm3N_L(gas_medium, p_bar_abs, T_celsius):
     if gas_medium == "Luft":
-        total = 0.0
-        for g, y in AIR_COMPONENTS:
-            total += gas_solubility_cm3N_per_L(g, p_bar_abs, T_celsius, y_gas=y)
-        return total * float(air_solubility_correction(T_celsius))
+        return air_solubility_cm3N_L(p_bar_abs, T_celsius)
     return gas_solubility_cm3N_per_L(gas_medium, p_bar_abs, T_celsius, y_gas=1.0)
 
 
@@ -837,12 +875,9 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
         dissolved_s = 0.0
         free_s = 0.0
         if gas_medium == "Luft":
-            corr = float(air_solubility_correction(T_celsius))
-            for g, y in AIR_COMPONENTS:
-                C_i = targets.get(g, float(C_target_cm3N_L) * float(y))
-                C_sat_i = gas_solubility_cm3N_per_L(g, p_suction_bar_abs, T_celsius, y_gas=y) * corr
-                dissolved_s += min(C_i, C_sat_i)
-                free_s += max(0.0, C_i - C_sat_i)
+            C_sat_s = air_solubility_cm3N_L(p_suction_bar_abs, T_celsius)
+            dissolved_s = min(float(C_target_cm3N_L), C_sat_s)
+            free_s = max(0.0, float(C_target_cm3N_L) - C_sat_s)
         else:
             C_sat_s = gas_solubility_cm3N_per_L(gas_medium, p_suction_bar_abs, T_celsius, y_gas=1.0)
             dissolved_s = min(float(C_target_cm3N_L), C_sat_s)
@@ -1425,13 +1460,9 @@ def run_multi_phase_pump():
             free = 0.0
             sat_total = 0.0
             if gas_medium == "Luft":
-                corr = float(air_solubility_correction(temperature))
-                for g, y in AIR_COMPONENTS:
-                    C_i = targets_local.get(g, float(C_target_cm3N_L) * float(y)) if targets_local else float(C_target_cm3N_L) * float(y)
-                    C_sat_i = gas_solubility_cm3N_per_L(g, p_abs_bar, temperature, y_gas=y) * corr
-                    sat_total += C_sat_i
-                    dissolved += min(C_i, C_sat_i)
-                    free += max(0.0, C_i - C_sat_i)
+                sat_total = air_solubility_cm3N_L(p_abs_bar, temperature)
+                dissolved = min(float(C_target_cm3N_L), sat_total)
+                free = max(0.0, float(C_target_cm3N_L) - sat_total)
             else:
                 C_sat = gas_solubility_cm3N_per_L(gas_medium, p_abs_bar, temperature, y_gas=1.0)
                 sat_total = C_sat
@@ -1619,12 +1650,12 @@ def run_multi_phase_pump():
             if show_temp_band:
                 for T in [temperature - 10, temperature, temperature + 10]:
                     if -10 <= T <= 150:
-                        p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
+                        p_arr, sol_arr = solubility_diagonal_curve_air_corrected(T)
                         if q_liq_lmin_plot:
                             sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
                             ax1.plot(p_arr, sol_lmin, "-", alpha=0.7, label=f"Luft (Gemisch) @ {T:.0f}°C")
             else:
-                p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
+                p_arr, sol_arr = solubility_diagonal_curve_air_corrected(temperature)
                 if q_liq_lmin_plot:
                     sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
                     ax1.plot(p_arr, sol_lmin, "-", label=f"Luft (Gemisch) @ {temperature:.0f}°C")
@@ -1635,12 +1666,14 @@ def run_multi_phase_pump():
                         if -10 <= T <= 150:
                             p_arr, sol_arr = solubility_diagonal_curve(g, T, y_gas=y)
                             if q_liq_lmin_plot:
-                                sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                                corr_vals = np.array([air_solubility_correction(p, T) for p in p_arr])
+                                sol_lmin = ((sol_arr * corr_vals) / 1000.0) * q_liq_lmin_plot
                                 ax1.plot(p_arr, sol_lmin, "--", alpha=0.35, label="_nolegend_")
                 else:
                     p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
                     if q_liq_lmin_plot:
-                        sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                        corr_vals = np.array([air_solubility_correction(p, temperature) for p in p_arr])
+                        sol_lmin = ((sol_arr * corr_vals) / 1000.0) * q_liq_lmin_plot
                         ax1.plot(p_arr, sol_lmin, "--", alpha=0.35, label="_nolegend_")
 
             if C_target_cm3N_L > 0 and q_liq_lmin_plot:
@@ -1649,7 +1682,7 @@ def run_multi_phase_pump():
                 ax1.text(13.8, C_target_lmin, "Q_gas_ziel (Luft)", va="center", ha="right", fontsize=8)
 
             if q_liq_lmin_plot:
-                Csat_s_mix = gas_solubility_cm3N_per_L("Luft", p_suction, temperature, y_gas=1.0)
+                Csat_s_mix = air_solubility_cm3N_L(p_suction, temperature)
                 ax1.scatter([p_suction], [(Csat_s_mix / 1000.0) * q_liq_lmin_plot], s=60, label="C_sat @ p_s (Luft)")
 
             if p_req is not None and C_target_cm3N_L > 0 and q_liq_lmin_plot:
@@ -1777,13 +1810,13 @@ def run_multi_phase_pump():
             if show_temp_band:
                 for T in [temperature - 10, temperature, temperature + 10]:
                     if -10 <= T <= 150:
-                        p_arr, sol_arr = solubility_diagonal_curve("Luft", T, y_gas=1.0)
+                        p_arr, sol_arr = solubility_diagonal_curve_air_corrected(T)
                         if q_liq_lmin_plot:
                             sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
                             ax3.plot(p_arr, sol_lmin, "-", alpha=0.7,
                                      label=f"Löslichkeit (Luft) @ {T:.0f}°C")
             else:
-                p_arr, sol_arr = solubility_diagonal_curve("Luft", temperature, y_gas=1.0)
+                p_arr, sol_arr = solubility_diagonal_curve_air_corrected(temperature)
                 if q_liq_lmin_plot:
                     sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
                     ax3.plot(p_arr, sol_lmin, "-", label=f"Löslichkeit (Luft) @ {temperature:.0f}°C")
@@ -1796,12 +1829,14 @@ def run_multi_phase_pump():
                         if -10 <= T <= 150:
                             p_arr, sol_arr = solubility_diagonal_curve(g, T, y_gas=y)
                             if q_liq_lmin_plot:
-                                sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                                corr_vals = np.array([air_solubility_correction(p, T) for p in p_arr])
+                                sol_lmin = ((sol_arr * corr_vals) / 1000.0) * q_liq_lmin_plot
                                 ax3.plot(p_arr, sol_lmin, "--", alpha=0.35, label="_nolegend_")
                 else:
                     p_arr, sol_arr = solubility_diagonal_curve(g, temperature, y_gas=y)
                     if q_liq_lmin_plot:
-                        sol_lmin = (sol_arr / 1000.0) * q_liq_lmin_plot
+                        corr_vals = np.array([air_solubility_correction(p, temperature) for p in p_arr])
+                        sol_lmin = ((sol_arr * corr_vals) / 1000.0) * q_liq_lmin_plot
                         ax3.plot(p_arr, sol_lmin, "--", alpha=0.35, label="_nolegend_")
         else:
             if show_temp_band:
