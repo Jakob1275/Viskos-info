@@ -22,6 +22,8 @@ N0_RPM_DEFAULT = 2900
 P_SUCTION_FIXED_BAR_ABS = 0.6
 SAT_PENALTY_WEIGHT = 1.5
 AIR_SOLUBILITY_REF_T_C = 20.0
+AIR_SOLUBILITY_REF_P_BAR = 5.0
+AIR_SOLUBILITY_REF_C_CM3N_L = 122.7
 AIR_SOLUBILITY_REF_TABLE = [
     (2.0, 36.8),
     (2.5, 46.0),
@@ -77,7 +79,10 @@ def air_solubility_correction(p_bar_abs, T_celsius):
             return 1.0
         p_vals = [p for p, _ in AIR_SOLUBILITY_REF_TABLE]
         c_vals = [c for _, c in AIR_SOLUBILITY_REF_TABLE]
-        ref = safe_interp(float(p_bar_abs), p_vals, c_vals)
+        ref_raw = safe_interp(float(p_bar_abs), p_vals, c_vals)
+        ref_at_5 = safe_interp(float(AIR_SOLUBILITY_REF_P_BAR), p_vals, c_vals)
+        scale = (float(AIR_SOLUBILITY_REF_C_CM3N_L) / float(ref_at_5)) if ref_at_5 > 0 else 1.0
+        ref = float(ref_raw) * float(scale)
         if ref <= 0:
             return 1.0
         return float(ref) / float(base)
