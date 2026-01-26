@@ -841,6 +841,13 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
             "gvf_curve_pct": gvf_curve_pct,
         }
 
+    def _target_Q_from_gvf(gvf_pct):
+        gvf_frac = safe_clamp(float(gvf_pct) / 100.0, 0.0, 1.0)
+        if gvf_frac <= 0.0:
+            return None
+        Q_liq_lmin = float(gas_target_norm_lmin) / gvf_frac
+        return (Q_liq_lmin * 60.0) / 1000.0
+
     for pump in pumps:
         try:
             if nu_cSt > pump.get("max_viscosity", 500):
@@ -881,7 +888,11 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                         if qmax_gvf <= qmin_gvf:
                             continue
 
-                        Q_candidates_gvf = np.linspace(qmin_gvf, qmax_gvf, 60)
+                        Q_candidates_gvf = np.linspace(qmin_gvf, qmax_gvf, 60).tolist()
+                        Q_target = _target_Q_from_gvf(gvf_c)
+                        if Q_target is not None and qmin_gvf <= Q_target <= qmax_gvf:
+                            Q_candidates_gvf.append(float(Q_target))
+                        Q_candidates_gvf = sorted(set(Q_candidates_gvf))
                         for Q_req in Q_candidates_gvf:
                             req = _calc_requirements_for_Q(Q_req, gvf_pct=gvf_c)
                             if req is None:
