@@ -20,6 +20,7 @@ R_BAR_L = 0.08314
 
 N0_RPM_DEFAULT = 2900
 P_SUCTION_FIXED_BAR_ABS = 0.6
+SAT_PENALTY_WEIGHT = 1.5
 
 MEDIA = {
     "Wasser": {"rho": 998.0, "nu": 1.0},
@@ -756,7 +757,9 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                 p_discharge = float(p_suction_bar_abs) + float(cand["dp_avail"])
                 C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
                 Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_liq_req_m3h, C_sat_total)
-                if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
+                sat_excess = max(0.0, Q_gas_pump_norm_lmin - Q_gas_solubility_norm_lmin)
+                sat_err = sat_excess / max(Q_gas_pump_norm_lmin, 1e-6)
+                if (not allow_partial_solution) and (sat_err > tol):
                     continue
 
                 gas_err = abs(Q_gas_pump_norm_lmin - Q_gas_req_norm_lmin) / max(Q_gas_req_norm_lmin, 1e-6)
@@ -765,6 +768,7 @@ def choose_best_mph_pump(pumps, Q_req_m3h, dp_req_bar, gvf_free_pct, nu_cSt, rho
                     float(w_gas) * gas_err +
                     float(w_power) * P_spec +
                     float(w_eta) * eta_term +
+                    float(SAT_PENALTY_WEIGHT) * sat_err +
                     3.0 * dp_err +
                     0.10 * abs(cand["n_ratio"] - 1.0)
                 )
@@ -908,8 +912,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_liq_m3h, C_sat_total)
 
                             # In Partial-Solution-Mode: Bewertung über lösbare Gasmenge
-                            if Q_gas_pump_norm_lmin > Q_gas_solubility_norm_lmin * (1.0 + tol):
-                                continue
+                            sat_excess = max(0.0, Q_gas_pump_norm_lmin - Q_gas_solubility_norm_lmin)
+                            sat_err = sat_excess / max(Q_gas_pump_norm_lmin, 1e-6)
                             gas_err = abs(Q_gas_pump_norm_lmin - gas_target_norm_lmin) / max(gas_target_norm_lmin, 1e-6)
 
                             P_spec = P_req / max(Q_req, 1e-6)
@@ -922,6 +926,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 float(w_gas) * gas_err +
                                 float(w_power) * P_spec +
                                 float(w_eta) * eta_term +
+                                float(SAT_PENALTY_WEIGHT) * sat_err +
                                 0.05 * p_term
                             )
 
@@ -979,7 +984,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             w_power=w_power, w_eta=w_eta, w_gas=w_gas,
                             C_target_cm3N_L=req["C_target_cm3N_L"], p_suction_bar_abs=p_suction_bar_abs,
                             T_celsius=T_celsius, gas_medium=gas_medium,
-                            allow_speed_adjustment=allow_speed_adjustment
+                            allow_speed_adjustment=allow_speed_adjustment,
+                            allow_partial_solution=allow_partial_solution
                         )
                         if cand is None:
                             continue
