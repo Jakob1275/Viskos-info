@@ -21,7 +21,9 @@ R_BAR_L = 0.08314
 N0_RPM_DEFAULT = 2900
 P_SUCTION_FIXED_BAR_ABS = 0.6
 SAT_PENALTY_WEIGHT = 1.5
-AIR_SOLUBILITY_CORRECTION = 1.27
+AIR_SOLUBILITY_REF_P_BAR = 5.0
+AIR_SOLUBILITY_REF_T_C = 20.0
+AIR_SOLUBILITY_REF_C_CM3N_L = 122.7
 
 MEDIA = {
     "Wasser": {"rho": 998.0, "nu": 1.0},
@@ -47,6 +49,18 @@ REAL_GAS_FACTORS = {
     "O2": lambda p_bar, T_K: 1.0,
     "CO2": lambda p_bar, T_K: max(0.9, 1.0 - 0.001 * (p_bar - 1.0)),
 }
+
+
+def air_solubility_correction(T_celsius):
+    try:
+        base = 0.0
+        for g, y in AIR_COMPONENTS:
+            base += gas_solubility_cm3N_per_L(g, AIR_SOLUBILITY_REF_P_BAR, AIR_SOLUBILITY_REF_T_C, y_gas=y)
+        if base <= 0:
+            return 1.0
+        return float(AIR_SOLUBILITY_REF_C_CM3N_L) / float(base)
+    except Exception:
+        return 1.0
 
 
 def show_error(e, context):
@@ -568,7 +582,7 @@ def pressure_required_for_air_components(T_celsius, C_total_cm3N_L, p_min=0.2, p
     targets = {}
     p_reqs = []
 
-    corr = max(float(AIR_SOLUBILITY_CORRECTION), 1e-9)
+    corr = max(float(air_solubility_correction(T_celsius)), 1e-9)
 
     for gas_i, y in AIR_COMPONENTS:
         C_i = float(C_total_cm3N_L) * float(y)
@@ -669,7 +683,7 @@ def gas_solubility_total_cm3N_L(gas_medium, p_bar_abs, T_celsius):
         total = 0.0
         for g, y in AIR_COMPONENTS:
             total += gas_solubility_cm3N_per_L(g, p_bar_abs, T_celsius, y_gas=y)
-        return total * float(AIR_SOLUBILITY_CORRECTION)
+        return total * float(air_solubility_correction(T_celsius))
     return gas_solubility_cm3N_per_L(gas_medium, p_bar_abs, T_celsius, y_gas=1.0)
 
 
@@ -823,9 +837,10 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
         dissolved_s = 0.0
         free_s = 0.0
         if gas_medium == "Luft":
+            corr = float(air_solubility_correction(T_celsius))
             for g, y in AIR_COMPONENTS:
                 C_i = targets.get(g, float(C_target_cm3N_L) * float(y))
-                C_sat_i = gas_solubility_cm3N_per_L(g, p_suction_bar_abs, T_celsius, y_gas=y) * float(AIR_SOLUBILITY_CORRECTION)
+                C_sat_i = gas_solubility_cm3N_per_L(g, p_suction_bar_abs, T_celsius, y_gas=y) * corr
                 dissolved_s += min(C_i, C_sat_i)
                 free_s += max(0.0, C_i - C_sat_i)
         else:
@@ -1410,9 +1425,10 @@ def run_multi_phase_pump():
             free = 0.0
             sat_total = 0.0
             if gas_medium == "Luft":
+                corr = float(air_solubility_correction(temperature))
                 for g, y in AIR_COMPONENTS:
                     C_i = targets_local.get(g, float(C_target_cm3N_L) * float(y)) if targets_local else float(C_target_cm3N_L) * float(y)
-                    C_sat_i = gas_solubility_cm3N_per_L(g, p_abs_bar, temperature, y_gas=y) * float(AIR_SOLUBILITY_CORRECTION)
+                    C_sat_i = gas_solubility_cm3N_per_L(g, p_abs_bar, temperature, y_gas=y) * corr
                     sat_total += C_sat_i
                     dissolved += min(C_i, C_sat_i)
                     free += max(0.0, C_i - C_sat_i)
