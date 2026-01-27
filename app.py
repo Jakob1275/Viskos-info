@@ -73,10 +73,11 @@ AIR_COMPONENTS = [
 ]
 
 REAL_GAS_FACTORS = {
+    # Für p < 10 bar ist Z ≈ 1.0 für Luft/N2/O2 akzeptabel, darüber sollte ein besseres Modell verwendet werden.
     "Luft": lambda p_bar, T_K: 1.0,
     "N2": lambda p_bar, T_K: 1.0,
     "O2": lambda p_bar, T_K: 1.0,
-    "CO2": lambda p_bar, T_K: max(0.9, 1.0 - 0.001 * (p_bar - 1.0)),
+    "CO2": lambda p_bar, T_K: max(0.9, 1.0 - 0.001 * (p_bar - 1.0)),  # Näherung, für hohe Drücke ungenau
 }
 
 
@@ -616,11 +617,17 @@ def real_gas_factor(gas, p_bar, T_celsius):
 def gas_solubility_cm3N_per_L(gas, p_bar_abs, T_celsius, y_gas=1.0):
     """
     Henry-basiert, Ausgabe: cm³N/L (Normvolumen pro Liter Flüssigkeit)
-    Hinweis: Vereinfachtes Modell (Trend/Robustheit).
+    Einheitenanalyse:
+    - H: Henry-Konstante [bar·L/mol]
+    - p: Partialdruck [bar]
+    - C_mol_L: Konzentration [mol/L]
+    - V_molar_oper: Molvolumen [L/mol] bei p,T
+    - V_oper_L_per_L: Gasvolumen [L/L] bei p,T
+    - ratio: Umrechnung operativ -> Normbedingungen
     """
     p = max(float(p_bar_abs), 1e-6)
     T_K = float(T_celsius) + 273.15
-    H = max(henry_constant(gas, T_celsius), 1e-12)
+    H = max(henry_constant(gas, T_celsius), 1e-12)  # bar·L/mol
     Z = max(real_gas_factor(gas, p, T_celsius), 0.5)
     p_partial = safe_clamp(float(y_gas), 0.0, 1.0) * p
 
@@ -633,6 +640,7 @@ def gas_solubility_cm3N_per_L(gas, p_bar_abs, T_celsius, y_gas=1.0):
 
     # oper -> normal
     ratio = (p / P_N_BAR) * (T_N_K / T_K) * (1.0 / Z)
+    # Rückgabe: Normvolumen cm³N/L
     return V_oper_L_per_L * ratio * 1000.0  # cm³N/L
 
 
@@ -1644,11 +1652,18 @@ def run_multi_phase_pump():
                     mappe_gas_lmin, _ = mappe10_air_lmin_lookup(best_pump["pump"]["id"], gvf_curve_pct, p_dbg, "gas_lmin")
                     mappe_sat_lmin, _ = mappe10_air_lmin_lookup(best_pump["pump"]["id"], gvf_curve_pct, p_dbg, "solubility_lmin")
                     if mappe_gas_lmin is not None:
+                        rel_diff = abs(Q_gas_norm_dbg - float(mappe_gas_lmin)) / max(float(mappe_gas_lmin), 1e-6)
+                        if rel_diff > 0.1:
+                            st.warning(f"MAPPE10: Berechnete Gasmenge ({Q_gas_norm_dbg:.2f}) weicht >10% von Messwert ({float(mappe_gas_lmin):.2f}) ab!")
                         Q_gas_norm_dbg = float(mappe_gas_lmin)
                     if mappe_sat_lmin is not None:
+                        rel_diff = abs(Q_gas_sat_norm_dbg - float(mappe_sat_lmin)) / max(float(mappe_sat_lmin), 1e-6)
+                        if rel_diff > 0.1:
+                            st.warning(f"MAPPE10: Berechnete Löslichkeit ({Q_gas_sat_norm_dbg:.2f}) weicht >10% von Messwert ({float(mappe_sat_lmin):.2f}) ab!")
                         Q_gas_sat_norm_dbg = float(mappe_sat_lmin)
                         if Q_liq_m3h_dbg > 0:
-                            C_sat_dbg = (Q_gas_sat_norm_dbg * 60.0) / float(Q_liq_m3h_dbg)
+                            # Korrigiere Einheitenfehler:
+                            C_sat_dbg = (Q_gas_sat_norm_dbg / 60.0) / Q_liq_m3h_dbg * 1000.0  # cm³N/L
 
                 # Freies Gas am Ausgang berechnen
                 Q_gas_free_dbg = max(0.0, Q_gas_norm_dbg - Q_gas_sat_norm_dbg)
