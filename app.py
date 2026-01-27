@@ -107,7 +107,7 @@ def air_solubility_cm3N_L(p_bar_abs, T_celsius):
     return total * float(air_solubility_correction(p_bar_abs, T_celsius))
 
 
-def mappe10_air_lmin_lookup(pump_id, gvf_pct, p_abs_bar, kind):
+def mappe10_air_lmin_lookup(pump_id, gvf_pct, p_abs_bar, kind, gvf_tol=0.25, allow_nearest=False):
     pump_map = MAPPE10_MPH_AIR_LMIN.get(pump_id)
     if not pump_map:
         return None, None
@@ -115,6 +115,8 @@ def mappe10_air_lmin_lookup(pump_id, gvf_pct, p_abs_bar, kind):
     if not keys:
         return None, None
     gvf_sel = min(keys, key=lambda k: abs(float(k) - float(gvf_pct)))
+    if (not allow_nearest) and (abs(float(gvf_sel) - float(gvf_pct)) > float(gvf_tol)):
+        return None, gvf_sel
     curve = pump_map.get(gvf_sel)
     if not curve or kind not in curve:
         return None, gvf_sel
