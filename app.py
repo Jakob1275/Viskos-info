@@ -1650,17 +1650,34 @@ def run_multi_phase_pump():
                         if Q_liq_m3h_dbg > 0:
                             C_sat_dbg = (Q_gas_sat_norm_dbg * 60.0) / float(Q_liq_m3h_dbg)
 
+                # Freies Gas am Ausgang berechnen
+                Q_gas_free_dbg = max(0.0, Q_gas_norm_dbg - Q_gas_sat_norm_dbg)
+                alles_geloest = Q_gas_norm_dbg <= Q_gas_sat_norm_dbg
+
+                st.markdown("**Betriebspunkt:**")
                 st.write({
                     "Q_total [m³/h]": round(Q_total_m3h_dbg, 3),
                     "Q_liq [m³/h]": round(Q_liq_m3h_dbg, 3),
-                    "Q_liq [L/min]": round(Q_liq_lmin_dbg, 2),
-                    "p_abs [bar]": round(p_dbg, 3),
-                    "GVF [%]": round(float(gvf_curve_pct), 2),
-                    "Q_gas_ziel [L/min Norm]": round(float(C_ziel_lmin), 2),
-                    "C_target [cm³N/L]": round(C_target_dbg, 2),
-                    "Q_gas_norm [L/min]": round(Q_gas_norm_dbg, 2),
-                    "C_sat [cm³N/L]": round(C_sat_dbg, 2),
-                    "Q_gas_sat_norm [L/min]": round(Q_gas_sat_norm_dbg, 2),
+                    "GVF Kennlinie [%]": round(float(gvf_curve_pct), 2),
+                    "p_austritt [bar abs]": round(p_dbg, 3),
+                })
+
+                st.markdown("**Gasbilanz (Norm L/min):**")
+                col_gas1, col_gas2 = st.columns(2)
+                with col_gas1:
+                    st.metric("Q_gas_ziel (Eingabe)", f"{float(C_ziel_lmin):.2f}")
+                    st.metric("Q_gas_pump (bei GVF)", f"{Q_gas_norm_dbg:.2f}")
+                with col_gas2:
+                    st.metric("Q_gas_lösbar (bei p_aus)", f"{Q_gas_sat_norm_dbg:.2f}")
+                    if alles_geloest:
+                        st.success(f"✅ Freies Gas: 0.00 (alles lösbar)")
+                    else:
+                        st.error(f"❌ Freies Gas: {Q_gas_free_dbg:.2f}")
+
+                st.markdown("**Konzentrationen (cm³N/L):**")
+                st.write({
+                    "C_target": round(C_target_dbg, 2),
+                    "C_sat (bei p_aus)": round(C_sat_dbg, 2),
                 })
 
                 issues_dbg = validate_gvf_consistency(
