@@ -2028,81 +2028,35 @@ def run_multi_phase_pump():
                     ax3.text(13.8, Cref_lmin, f"{Cref_lmin:.1f} L/min", va="center", ha="right", fontsize=8)
 
         if best_pump and dp_req is not None:
+
             pump = best_pump["pump"]
             Q_total_m3h_sel_plot = float(best_pump["Q_m3h"])
             gvf_plot = float(gvf_curve_pct)
             n_ratio_sel = float(best_pump.get("n_ratio", 1.0))
 
-            if use_interpolated_gvf:
-                base_keys = sorted(pump["curves_dp_vs_Q"].keys())
-                base_curve = pump["curves_dp_vs_Q"][base_keys[0]]
-                Q_curve = list(map(float, base_curve["Q"]))
-                dp_curve = [_dp_at_Q_gvf(pump, q, gvf_plot)[0] for q in Q_curve]
-            else:
-                sel_curve = pump["curves_dp_vs_Q"].get(gvf_plot)
-                if sel_curve:
-                    Q_curve, dp_curve = align_xy(sel_curve["Q"], sel_curve["dp"])
-                    Q_curve = list(map(float, Q_curve))
-                    dp_curve = list(map(float, dp_curve))
-                else:
-                    Q_curve, dp_curve = [], []
+            # Plot Pumpenkennlinie als Q_gas = Q_liq * C_kennlinie / 60
+            kennlinien_keys = sorted(pump["curves_dp_vs_Q"].keys())
+            for gvf_key in kennlinien_keys:
+                if gvf_key <= 30:
+                    curve = pump["curves_dp_vs_Q"][gvf_key]
+                    Q_curve, dp_curve = align_xy(curve["Q"], curve["dp"])
+                    Q_curve = [q * n_ratio_sel for q in Q_curve]
+                    dp_curve = [dp * (n_ratio_sel ** 2) for dp in dp_curve]
+                    p_abs = [float(p_suction) + dp for dp in dp_curve]
+                    C_kennlinie = dissolved_concentration_cm3N_L_from_pct(gvf_key)
+                    Q_gas_curve = [(q * C_kennlinie) / 60.0 for q in Q_curve]
+                    ax3.plot(p_abs, Q_gas_curve, "--", alpha=0.5, label=f"Kennlinie {gvf_key:.0f}% ({C_kennlinie:.0f} cm³N/L)")
 
-            if Q_curve and dp_curve and gvf_plot <= 30:
-                Q_curve_scaled = [q * n_ratio_sel for q in Q_curve]
-                dp_curve_scaled = [dp * (n_ratio_sel ** 2) for dp in dp_curve]
-                p_abs = [float(p_suction) + dp for dp in dp_curve_scaled]
-                Q_gas_norm_lmin = []
-                for q, p in zip(Q_curve_scaled, p_abs):
-                    _, Q_gas_oper_m3h = gvf_to_flow_split(q, gvf_plot)
-                    Q_gas_norm_lmin.append(
-                        gas_oper_m3h_to_norm_lmin(Q_gas_oper_m3h, p, temperature, gas_medium)
-                    )
-                p_abs_curve = p_abs
-                q_gas_lmin_curve = Q_gas_norm_lmin
-                ax3.plot(p_abs, Q_gas_norm_lmin, "-", linewidth=2.5, color="tab:red",
-                         label=f"Pumpe (GVF→Gas, n={n_ratio_sel:.2f}·n0)")
+        # Betriebspunkt markieren
+        Q_liq_bp, _ = gvf_to_flow_split(Q_total_m3h_sel_plot, gvf_plot)
+        C_kennlinie_bp = dissolved_concentration_cm3N_L_from_pct(gvf_plot)
+        Q_gas_bp = Q_liq_bp * C_kennlinie_bp / 60.0
+        p_bp = float(p_suction) + float(best_pump["dp_avail"])
+        ax3.scatter([p_bp], [Q_gas_bp], s=80, color="tab:red", marker="x", label="Betriebspunkt (Kennlinie)")
 
-                ax3.scatter(
-                    [float(p_suction) + float(best_pump["dp_avail"])],
-                    [gas_oper_m3h_to_norm_lmin(
-                        gvf_to_flow_split(Q_total_m3h_sel_plot, gvf_plot)[1],
-                        float(p_suction) + float(best_pump["dp_avail"]),
-                        temperature,
-                        gas_medium
-                    )],
-                    s=80,
-                    color="tab:red",
-                    marker="x",
-                    label="Betriebspunkt (GVF→Gas)"
-                )
-
-                # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (L/min)
-                if c_sat_curve_p and c_sat_curve_c and q_liq_lmin_plot:
-                    c_sat_at_p = [safe_interp(p, c_sat_curve_p, c_sat_curve_c) for p in p_abs]
-                    c_sat_at_p_lmin = [(c / 1000.0) * q_liq_lmin_plot for c in c_sat_at_p]
-                    hit = None
-                    for i in range(len(p_abs) - 1):
-                        d0 = Q_gas_norm_lmin[i] - c_sat_at_p_lmin[i]
-                        d1 = Q_gas_norm_lmin[i + 1] - c_sat_at_p_lmin[i + 1]
-                        if d0 == 0:
-                            hit = (p_abs[i], Q_gas_norm_lmin[i])
-                            break
-                        if d0 * d1 < 0:
-                            t = abs(d0) / (abs(d0) + abs(d1))
-                            p_hit = p_abs[i] + (p_abs[i + 1] - p_abs[i]) * t
-                            q_hit = Q_gas_norm_lmin[i] + (Q_gas_norm_lmin[i + 1] - Q_gas_norm_lmin[i]) * t
-                            hit = (p_hit, q_hit)
-                            break
-
-                    if hit is not None:
-                        ax3.scatter(
-                            [hit[0]],
-                            [hit[1]],
-                            s=120,
-                            marker="^",
-                            color="tab:green",
-                            label="Schnittpunkt (Sättigung)"
-                        )
+        # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (L/min)
+        # (Falls benötigt, hier ggf. anpassen und korrekt einrücken)
+        # (Code entfernt, da nicht mehr benötigt oder zu refaktorisieren)
 
         ax3.legend(loc="best")
 
