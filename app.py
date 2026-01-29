@@ -1579,43 +1579,20 @@ def run_multi_phase_pump():
             st.warning("Hinweis: Q_gas_ziel ist mit den Kennlinien nicht vollständig lösbar. Es wird die bestmögliche Annäherung angezeigt.")
 
         with st.expander("Debug – Mehrphasen‑Zwischengrößen"):
+
             if best_pump:
                 Q_total_m3h_dbg = float(best_pump.get("Q_m3h", 0.0))
                 dp_dbg = float(best_pump.get("dp_avail", 0.0))
                 p_dbg = float(p_suction) + dp_dbg
                 Q_liq_m3h_dbg, _ = gvf_to_flow_split(Q_total_m3h_dbg, float(gvf_curve_pct))
                 Q_liq_lmin_dbg = m3h_to_lmin(Q_liq_m3h_dbg)
-                C_target_dbg = (1000.0 * float(C_ziel_lmin)) / max(Q_liq_lmin_dbg, 1e-12)
-                _, Q_gas_oper_m3h_dbg = gvf_to_flow_split(Q_total_m3h_dbg, float(gvf_curve_pct))
-                Q_gas_norm_dbg = gas_oper_m3h_to_norm_lmin(
-                    Q_gas_oper_m3h_dbg,
-                    p_dbg,
-                    temperature,
-                    gas_medium
-                )
+                # Neue Logik: Konzentration aus Kennlinie
+                C_kennlinie_dbg = dissolved_concentration_cm3N_L_from_pct(float(gvf_curve_pct))
                 C_sat_dbg = gas_solubility_total_cm3N_L(gas_medium, p_dbg, temperature)
-                Q_gas_sat_norm_dbg = gas_flow_required_norm_lmin(Q_liq_m3h_dbg, C_sat_dbg)
-
-                if gas_medium == "Luft" and best_pump:
-                    mappe_gas_lmin, _ = mappe10_air_lmin_lookup(best_pump["pump"]["id"], gvf_curve_pct, p_dbg, "gas_lmin")
-                    mappe_sat_lmin, _ = mappe10_air_lmin_lookup(best_pump["pump"]["id"], gvf_curve_pct, p_dbg, "solubility_lmin")
-                    if mappe_gas_lmin is not None:
-                        rel_diff = abs(Q_gas_norm_dbg - float(mappe_gas_lmin)) / max(float(mappe_gas_lmin), 1e-6)
-                        if rel_diff > 0.1:
-                            st.warning(f"MAPPE10: Berechnete Gasmenge ({Q_gas_norm_dbg:.2f}) weicht >10% von Messwert ({float(mappe_gas_lmin):.2f}) ab!")
-                        Q_gas_norm_dbg = float(mappe_gas_lmin)
-                    if mappe_sat_lmin is not None:
-                        rel_diff = abs(Q_gas_sat_norm_dbg - float(mappe_sat_lmin)) / max(float(mappe_sat_lmin), 1e-6)
-                        if rel_diff > 0.1:
-                            st.warning(f"MAPPE10: Berechnete Löslichkeit ({Q_gas_sat_norm_dbg:.2f}) weicht >10% von Messwert ({float(mappe_sat_lmin):.2f}) ab!")
-                        Q_gas_sat_norm_dbg = float(mappe_sat_lmin)
-                        if Q_liq_m3h_dbg > 0:
-                            # Korrigiere Einheitenfehler:
-                            C_sat_dbg = (Q_gas_sat_norm_dbg / 60.0) / Q_liq_m3h_dbg * 1000.0  # cm³N/L
-
-                # Freies Gas am Ausgang berechnen
-                Q_gas_free_dbg = max(0.0, Q_gas_norm_dbg - Q_gas_sat_norm_dbg)
-                alles_geloest = Q_gas_norm_dbg <= Q_gas_sat_norm_dbg
+                Q_gas_pump_dbg = Q_liq_m3h_dbg * C_kennlinie_dbg / 60.0
+                Q_gas_losbar_dbg = Q_liq_m3h_dbg * C_sat_dbg / 60.0
+                Q_gas_free_dbg = max(0.0, Q_gas_pump_dbg - Q_gas_losbar_dbg)
+                alles_geloest = Q_gas_pump_dbg <= Q_gas_losbar_dbg
 
                 st.markdown("**Betriebspunkt:**")
                 st.write({
@@ -1629,9 +1606,9 @@ def run_multi_phase_pump():
                 col_gas1, col_gas2 = st.columns(2)
                 with col_gas1:
                     st.metric("Q_gas_ziel (Eingabe)", f"{float(C_ziel_lmin):.2f}")
-                    st.metric("Q_gas_pump (bei GVF)", f"{Q_gas_norm_dbg:.2f}")
+                    st.metric("Q_gas_pump (Kennlinie)", f"{Q_gas_pump_dbg:.2f}")
                 with col_gas2:
-                    st.metric("Q_gas_lösbar (bei p_aus)", f"{Q_gas_sat_norm_dbg:.2f}")
+                    st.metric("Q_gas_lösbar (bei p_aus)", f"{Q_gas_losbar_dbg:.2f}")
                     if alles_geloest:
                         st.success(f"✅ Freies Gas: 0.00 (alles lösbar)")
                     else:
@@ -1639,7 +1616,7 @@ def run_multi_phase_pump():
 
                 st.markdown("**Konzentrationen (cm³N/L):**")
                 st.write({
-                    "C_target": round(C_target_dbg, 2),
+                    "C_kennlinie": round(C_kennlinie_dbg, 2),
                     "C_sat (bei p_aus)": round(C_sat_dbg, 2),
                 })
 
@@ -1649,7 +1626,7 @@ def run_multi_phase_pump():
                     p_bar_abs=p_dbg,
                     T_celsius=temperature,
                     gas=gas_medium,
-                    Q_gas_norm_lmin=Q_gas_norm_dbg
+                    Q_gas_norm_lmin=Q_gas_pump_dbg
                 )
                 if issues_dbg:
                     st.warning("Validierung (Debug): " + " ".join(issues_dbg))
