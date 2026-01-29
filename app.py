@@ -1,5 +1,3 @@
-st.set_page_config(page_title="Pumpenauslegungstool", layout="wide")
-
 import math
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -1216,7 +1214,6 @@ def choose_best_mph_pump_autoQ(
             continue
 
     return best
-
 
 # =========================
 # Pages
