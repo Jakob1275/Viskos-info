@@ -1629,18 +1629,28 @@ def run_multi_phase_pump():
             st.warning("Hinweis: Q_gas_ziel ist mit den Kennlinien nicht vollständig lösbar. Es wird die bestmögliche Annäherung angezeigt.")
 
         with st.expander("Debug – Mehrphasen‑Zwischengrößen"):
-
             if best_pump:
                 Q_total_m3h_dbg = float(best_pump.get("Q_m3h", 0.0))
                 dp_dbg = float(best_pump.get("dp_avail", 0.0))
                 p_dbg = float(p_suction) + dp_dbg
-                Q_liq_m3h_dbg, _ = gvf_to_flow_split(Q_total_m3h_dbg, float(gvf_curve_pct))
+                gvf_dbg = float(gvf_curve_pct)
+
+                # GVF → freies Gas (operativ) → Norm
+                Q_liq_m3h_dbg, Q_gas_oper_m3h_dbg = gvf_to_flow_split(Q_total_m3h_dbg, gvf_dbg)
                 Q_liq_lmin_dbg = m3h_to_lmin(Q_liq_m3h_dbg)
-                # Neue Logik: Konzentration aus Kennlinie
-                C_kennlinie_dbg = dissolved_concentration_cm3N_L_from_pct(float(gvf_curve_pct))
+                Q_gas_norm_lmin_dbg = gas_oper_m3h_to_norm_lmin(
+                    Q_gas_oper_m3h_dbg, p_suction, temperature, gas_medium
+                )
+
+                # Konzentration (falls alles gelöst wird)
+                C_dissolved_dbg = (Q_gas_norm_lmin_dbg / max(Q_liq_lmin_dbg, 1e-12)) * 1000.0
+
+                # Löslichkeit am Austritt
                 C_sat_dbg = gas_solubility_total_cm3N_L(gas_medium, p_dbg, temperature)
-                Q_gas_pump_dbg = Q_liq_m3h_dbg * C_kennlinie_dbg / 60.0
-                Q_gas_losbar_dbg = Q_liq_m3h_dbg * C_sat_dbg / 60.0
+
+                # Gasbilanz
+                Q_gas_pump_dbg = Q_gas_norm_lmin_dbg  # L/min (Norm)
+                Q_gas_losbar_dbg = gas_flow_from_concentration(C_sat_dbg, Q_liq_m3h_dbg)  # L/min
                 Q_gas_free_dbg = max(0.0, Q_gas_pump_dbg - Q_gas_losbar_dbg)
                 alles_geloest = Q_gas_pump_dbg <= Q_gas_losbar_dbg
 
@@ -1648,7 +1658,7 @@ def run_multi_phase_pump():
                 st.write({
                     "Q_total [m³/h]": round(Q_total_m3h_dbg, 3),
                     "Q_liq [m³/h]": round(Q_liq_m3h_dbg, 3),
-                    "GVF Kennlinie [%]": round(float(gvf_curve_pct), 2),
+                    "GVF Kennlinie [%]": round(gvf_dbg, 2),
                     "p_austritt [bar abs]": round(p_dbg, 3),
                 })
 
@@ -1666,7 +1676,7 @@ def run_multi_phase_pump():
 
                 st.markdown("**Konzentrationen (cm³N/L):**")
                 st.write({
-                    "C_kennlinie": round(C_kennlinie_dbg, 2),
+                    "C_dissolved (freies Gas, wenn gelöst)": round(C_dissolved_dbg, 2),
                     "C_sat (bei p_aus)": round(C_sat_dbg, 2),
                 })
 
