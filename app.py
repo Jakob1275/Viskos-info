@@ -1085,12 +1085,17 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                             C_kennlinie = dissolved_concentration_cm3N_L_from_pct(gvf_c)
                             # Löslichkeit am Austritt:
                             C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
-                            # Nur zulassen, wenn alles gelöst werden kann:
+                            # Zielkonzentration aus Q_gas_ziel und Q_liq:
+                            Q_liq_lmin = m3h_to_lmin(Q_liq_m3h)
+                            C_ziel = float(gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12) * 1000.0
+                            # Nur zulassen, wenn Zielkonzentration erreicht und alles gelöst werden kann:
+                            if C_kennlinie < C_ziel:
+                                continue
                             if C_kennlinie > C_sat_total:
                                 continue
 
-                            # Score: Je höher die gelöste Konzentration, desto besser (negativer Score)
-                            score = -C_kennlinie
+                            # Score: Je näher an der Zielkonzentration, desto besser (Abweichung minimal)
+                            score = abs(C_kennlinie - C_ziel)
                             cand = {
                                 "pump": pump,
                                 "gvf_key": gvf_c,
@@ -1103,6 +1108,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 "solution_status": "strict",
                                 "C_kennlinie": C_kennlinie,
                                 "C_sat_total": C_sat_total,
+                                "C_ziel": C_ziel,
                             }
                             cand.update(req)
                             if best_local is None or score < best_local["score2"]:
