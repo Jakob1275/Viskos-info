@@ -1121,9 +1121,14 @@ def choose_best_mph_pump_autoQ(
                             # Target concentration (from user target)
                             C_ziel = float(gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12) * 1000.0
                             # Only allow if all gas can be dissolved at discharge and target is met
+                            # Debug: Filtergründe ausgeben
                             if C_dissolved < C_ziel:
+                                if DEBUG:
+                                    print(f"Kandidat verworfen: C_dissolved < C_ziel | C_dissolved={C_dissolved:.2f} < C_ziel={C_ziel:.2f} | Q_gas_norm_lmin={Q_gas_norm_lmin:.2f} | Q_liq_lmin={Q_liq_lmin:.2f} | GVF={gvf_c:.2f}")
                                 continue
                             if C_dissolved > C_sat_total:
+                                if DEBUG:
+                                    print(f"Kandidat verworfen: C_dissolved > C_sat_total | C_dissolved={C_dissolved:.2f} > C_sat_total={C_sat_total:.2f} | p_discharge={p_discharge:.2f} | Q_gas_norm_lmin={Q_gas_norm_lmin:.2f} | Q_liq_lmin={Q_liq_lmin:.2f} | GVF={gvf_c:.2f}")
                                 continue
 
                             # Score: Je näher an der Zielkonzentration, desto besser (Abweichung minimal)
