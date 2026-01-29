@@ -1215,6 +1215,7 @@ def choose_best_mph_pump_autoQ(
 
     return best
 
+
 # =========================
 # Pages
 # =========================
@@ -2060,8 +2061,8 @@ def run_multi_phase_pump():
                     ax3.axhline(Cref_lmin, linestyle=":", alpha=0.25)
                     ax3.text(13.8, Cref_lmin, f"{Cref_lmin:.1f} L/min", va="center", ha="right", fontsize=8)
 
-        if best_pump and dp_req is not None:
 
+        if best_pump and dp_req is not None:
             pump = best_pump["pump"]
             Q_total_m3h_sel_plot = float(best_pump["Q_m3h"])
             gvf_plot = float(gvf_curve_pct)
@@ -2080,12 +2081,12 @@ def run_multi_phase_pump():
                     Q_gas_curve = [(q * C_kennlinie) / 60.0 for q in Q_curve]
                     ax3.plot(p_abs, Q_gas_curve, "--", alpha=0.5, label=f"Kennlinie {gvf_key:.0f}% ({C_kennlinie:.0f} cm³N/L)")
 
-        # Betriebspunkt markieren
-        Q_liq_bp, _ = gvf_to_flow_split(Q_total_m3h_sel_plot, gvf_plot)
-        C_kennlinie_bp = dissolved_concentration_cm3N_L_from_pct(gvf_plot)
-        Q_gas_bp = Q_liq_bp * C_kennlinie_bp / 60.0
-        p_bp = float(p_suction) + float(best_pump["dp_avail"])
-        ax3.scatter([p_bp], [Q_gas_bp], s=80, color="tab:red", marker="x", label="Betriebspunkt (Kennlinie)")
+            # Betriebspunkt markieren
+            Q_liq_bp, _ = gvf_to_flow_split(Q_total_m3h_sel_plot, gvf_plot)
+            C_kennlinie_bp = dissolved_concentration_cm3N_L_from_pct(gvf_plot)
+            Q_gas_bp = Q_liq_bp * C_kennlinie_bp / 60.0
+            p_bp = float(p_suction) + float(best_pump["dp_avail"])
+            ax3.scatter([p_bp], [Q_gas_bp], s=80, color="tab:red", marker="x", label="Betriebspunkt (Kennlinie)")
 
         # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (L/min)
         # (Falls benötigt, hier ggf. anpassen und korrekt einrücken)
