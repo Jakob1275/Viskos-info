@@ -1,11 +1,23 @@
+st.set_page_config(page_title="Pumpenauslegungstool", layout="wide")
+
 import math
 from datetime import datetime
-
 import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 
 st.set_page_config(page_title="Pumpenauslegungstool", layout="wide")
+
+# =========================
+# Hilfsfunktion: Umrechnung Konzentration <-> Gasvolumenstrom
+# =========================
+def gas_flow_from_concentration(C_cm3N_L, Q_liq_m3h):
+    """
+    Umrechnung: Konzentration (cm³N/L) und Flüssigkeitsstrom (m³/h) zu Gasvolumenstrom (Norm) in L/min.
+    Q_gas_norm_lmin = (C_cm3N_L / 1000.0) * Q_liq_lmin
+    """
+    Q_liq_lmin = m3h_to_lmin(Q_liq_m3h)
+    return (C_cm3N_L / 1000.0) * Q_liq_lmin
 
 # =========================
 # Config / Globals
@@ -952,12 +964,14 @@ def choose_best_mph_pump(pumps, Q_total_m3h, dp_req_bar, gvf_free_pct, nu_cSt, r
     return best
 
 
-def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T_celsius, gas_medium,
-                              safety_factor_pct, use_interpolated_gvf,
-                              nu_cSt, rho_liq,
-                              n_min_ratio=0.5, n_max_ratio=1.2,
-                              w_power=0.5, w_eta=0.3, w_gas=0.2,
-                              allow_speed_adjustment=False, allow_partial_solution=False):
+def choose_best_mph_pump_autoQ(
+    pumps, gas_target_norm_lmin, p_suction_bar_abs, T_celsius, gas_medium,
+    safety_factor_pct, use_interpolated_gvf,
+    nu_cSt, rho_liq,
+    n_min_ratio=0.5, n_max_ratio=1.2,
+    w_power=0.5, w_eta=0.3, w_gas=0.2,
+    allow_speed_adjustment=False, allow_partial_solution=False
+):
     """
     Q ist nicht Eingabe: es werden Kandidaten-Q aus Kennlinien geprüft.
     """
@@ -1073,29 +1087,49 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                         if Q_target is not None and qmin_gvf <= Q_target <= qmax_gvf:
                             Q_candidates_gvf.append(float(Q_target))
                         Q_candidates_gvf = sorted(set(Q_candidates_gvf))
+                        # --- Pumpenkurvenauswahl & Validierung: ---
+                        # 1. Die Kennlinien sind nach GVF an der Saugseite (free gas fraction at suction) definiert.
+                        # 2. Für jede Q_total und GVF-Kombination an der Saugseite werden die Anforderungen berechnet.
+                        # 3. Die Gasbilanz erfolgt so:
+                        #    a) Q_total_m3h wird mit GVF in Q_liq und Q_gas (operativ, Saugseite) aufgeteilt.
+                        #    b) Q_gas (operativ) wird auf Normbedingungen umgerechnet (Q_gas_norm_lmin).
+                        #    c) Am Austritt (p_discharge) wird geprüft, ob die gesamte Gasmenge nach Henry gelöst werden kann (C_sat_total).
+                        #    d) Die tatsächlich zu lösende Konzentration (C_dissolved) wird aus Q_gas_norm_lmin und Q_liq_lmin berechnet.
+                        #    e) Nur wenn C_dissolved <= C_sat_total und C_dissolved >= C_ziel, ist die Lösung physikalisch zulässig.
+                        # 4. Die Einheitenumrechnung erfolgt explizit und nachvollziehbar (siehe Hilfsfunktion gas_flow_from_concentration).
+                        # 5. Die Auswahl erfolgt nach minimaler Abweichung zur Zielkonzentration (score).
                         for Q_total_m3h in Q_candidates_gvf:
+                            # Für jede Q_total und GVF-Kombination an der Saugseite Anforderungen berechnen:
                             req = _calc_requirements_for_Q(Q_total_m3h, gvf_pct=gvf_c)
                             if req is None:
                                 continue
 
                             dp_avail, _, _, _ = _dp_at_Q_gvf(pump, Q_total_m3h, gvf_c)
                             p_discharge = float(p_suction_bar_abs) + float(dp_avail)
-                            Q_liq_m3h, _ = gvf_to_flow_split(Q_total_m3h, gvf_c)
-                            # Kennlinienwert als Konzentration interpretieren:
-                            C_kennlinie = dissolved_concentration_cm3N_L_from_pct(gvf_c)
-                            # Löslichkeit am Austritt:
-                            C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
-                            # Zielkonzentration aus Q_gas_ziel und Q_liq:
+                            # Split total flow into liquid and free gas at suction (using GVF from curve)
+                            Q_liq_m3h, Q_gas_m3h = gvf_to_flow_split(Q_total_m3h, gvf_c)
                             Q_liq_lmin = m3h_to_lmin(Q_liq_m3h)
+                            # Convert free gas at suction to norm L/min (for target comparison)
+                            Q_gas_norm_lmin = gas_oper_m3h_to_norm_lmin(Q_gas_m3h, p_suction_bar_abs, T_celsius, gas_medium)
+                            # Calculate the maximum dissolved concentration at discharge (Henry)
+                            C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
+                            # Calculate the actual dissolved concentration if all gas is dissolved at discharge
+                            # (Assume all free gas at suction is dissolved at discharge)
+                            # C_dissolved [cm³N/L] = Q_gas_norm_lmin / Q_liq_lmin * 1000
+                            C_dissolved = (Q_gas_norm_lmin / max(Q_liq_lmin, 1e-12)) * 1000.0
+
+                            # Alternativ: Umrechnung zurück zu Q_gas_norm_lmin aus C_dissolved (Konsistenzprüfung)
+                            Q_gas_norm_lmin_check = gas_flow_from_concentration(C_dissolved, Q_liq_m3h)
+                            # Target concentration (from user target)
                             C_ziel = float(gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12) * 1000.0
-                            # Nur zulassen, wenn Zielkonzentration erreicht und alles gelöst werden kann:
-                            if C_kennlinie < C_ziel:
+                            # Only allow if all gas can be dissolved at discharge and target is met
+                            if C_dissolved < C_ziel:
                                 continue
-                            if C_kennlinie > C_sat_total:
+                            if C_dissolved > C_sat_total:
                                 continue
 
                             # Score: Je näher an der Zielkonzentration, desto besser (Abweichung minimal)
-                            score = abs(C_kennlinie - C_ziel)
+                            score = abs(C_dissolved - C_ziel)
                             # Hydraulische Leistung (kW): P_hyd = dp_avail [bar] * Q_total_m3h / 36
                             P_req = (dp_avail * Q_total_m3h) / 36.0
                             cand = {
@@ -1111,9 +1145,11 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 "score": score,
                                 "score2": score,
                                 "solution_status": "strict",
-                                "C_kennlinie": C_kennlinie,
+                                "C_dissolved": C_dissolved,
                                 "C_sat_total": C_sat_total,
                                 "C_ziel": C_ziel,
+                                "Q_gas_norm_lmin": Q_gas_norm_lmin,
+                                "Q_liq_lmin": Q_liq_lmin,
                             }
                             cand.update(req)
                             if best_local is None or score < best_local["score2"]:
