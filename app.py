@@ -1096,6 +1096,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
 
                             # Score: Je näher an der Zielkonzentration, desto besser (Abweichung minimal)
                             score = abs(C_kennlinie - C_ziel)
+                            # Hydraulische Leistung (kW): P_hyd = dp_avail [bar] * Q_total_m3h / 36
+                            P_req = (dp_avail * Q_total_m3h) / 36.0
                             cand = {
                                 "pump": pump,
                                 "gvf_key": gvf_c,
@@ -1103,6 +1105,7 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 "dp_avail": dp_avail,
                                 "p_req": req.get("p_req"),
                                 "Q_m3h": Q_total_m3h,
+                                "P_req": P_req,
                                 "score": score,
                                 "score2": score,
                                 "solution_status": "strict",
