@@ -1079,85 +1079,33 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 continue
 
                             dp_avail, _, _, _ = _dp_at_Q_gvf(pump, Q_total_m3h, gvf_c)
-                            P_req, _, _, _ = _P_at_Q_gvf(pump, Q_total_m3h, gvf_c)
                             p_discharge = float(p_suction_bar_abs) + float(dp_avail)
-
-                            Q_liq_m3h, Q_gas_oper_m3h = gvf_to_flow_split(Q_total_m3h, gvf_c)
-                            Q_gas_pump_norm_lmin = gas_oper_m3h_to_norm_lmin(
-                                Q_gas_oper_m3h,
-                                p_discharge,
-                                T_celsius,
-                                gas_medium
-                            )
+                            Q_liq_m3h, _ = gvf_to_flow_split(Q_total_m3h, gvf_c)
+                            # Kennlinienwert als Konzentration interpretieren:
+                            C_kennlinie = dissolved_concentration_cm3N_L_from_pct(gvf_c)
+                            # Löslichkeit am Austritt:
                             C_sat_total = gas_solubility_total_cm3N_L(gas_medium, p_discharge, T_celsius)
-                            Q_gas_solubility_norm_lmin = gas_flow_required_norm_lmin(Q_liq_m3h, C_sat_total)
+                            # Nur zulassen, wenn alles gelöst werden kann:
+                            if C_kennlinie > C_sat_total:
+                                continue
 
-                            if gas_medium == "Luft":
-                                mappe_gas_lmin, _ = mappe10_air_lmin_lookup(pump["id"], gvf_c, p_discharge, "gas_lmin")
-                                mappe_sat_lmin, _ = mappe10_air_lmin_lookup(pump["id"], gvf_c, p_discharge, "solubility_lmin")
-                                if mappe_gas_lmin is not None:
-                                    Q_gas_pump_norm_lmin = float(mappe_gas_lmin)
-                                if mappe_sat_lmin is not None:
-                                    Q_gas_solubility_norm_lmin = float(mappe_sat_lmin)
-
-                            # In Partial-Solution-Mode: Bewertung über lösbare Gasmenge
-                            sat_excess = max(0.0, Q_gas_pump_norm_lmin - Q_gas_solubility_norm_lmin)
-                            sat_err = sat_excess / max(Q_gas_pump_norm_lmin, 1e-6)
-                            gas_err = abs(Q_gas_pump_norm_lmin - gas_target_norm_lmin) / max(gas_target_norm_lmin, 1e-6)
-
-                            dp_req_local = float(req.get("dp_req", 0.0))
-                            dp_err = 0.0 if dp_req_local <= 0 else abs(float(dp_avail) - dp_req_local) / max(dp_req_local, 1e-6)
-
-                            P_spec = P_req / max(Q_total_m3h, 1e-6)
-                            P_hyd_kW = (dp_avail * BAR_TO_PA) * (Q_total_m3h / 3600.0) / 1000.0
-                            eta_est = safe_clamp(P_hyd_kW / max(P_req, 1e-9), 0.0, 1.0)
-                            eta_term = 1.0 - eta_est
-                            p_term = dp_avail / max(pump["dp_max_bar"], 1e-9)
-
-                            score = (
-                                float(w_gas) * gas_err +
-                                float(w_power) * P_spec +
-                                float(w_eta) * eta_term +
-                                float(SAT_PENALTY_WEIGHT) * sat_err +
-                                3.0 * dp_err +
-                                0.05 * p_term
-                            )
-
+                            # Score: Je höher die gelöste Konzentration, desto besser (negativer Score)
+                            score = -C_kennlinie
                             cand = {
                                 "pump": pump,
                                 "gvf_key": gvf_c,
                                 "gvf_curve_pct": float(gvf_c),
                                 "dp_avail": dp_avail,
-                                "dp_req": dp_req_local,
                                 "p_req": req.get("p_req"),
-                                "P_req": P_req,
-                                "n_ratio": 1.0,
-                                "n_rpm": pump["n0_rpm"],
-                                "mode": "Nenndrehzahl",
                                 "Q_m3h": Q_total_m3h,
                                 "score": score,
                                 "score2": score,
-                                "eta_est": eta_est,
-                                "gas_err": gas_err,
-                                "dp_err": dp_err,
-                                "solution_status": "partial" if relaxed else "strict",
+                                "solution_status": "strict",
+                                "C_kennlinie": C_kennlinie,
+                                "C_sat_total": C_sat_total,
                             }
-
                             cand.update(req)
-                            # Sicherstellen, dass der tatsächlich geprüfte GVF erhalten bleibt
-                            cand["gvf_curve_pct"] = float(gvf_c)
-                            cand["p_req"] = req.get("p_req")
-                            cand["dp_req"] = dp_req_local
-
-                            q_rel = Q_total_m3h / max(pump["Q_max_m3h"], 1e-9)
-                            edge_penalty = 0.0
-                            if q_rel < 0.2 or q_rel > 0.9:
-                                edge_penalty = 0.8
-
-                            cand_score = cand["score"] + edge_penalty
-                            cand["score2"] = cand_score
-
-                            if best_local is None or cand_score < best_local["score2"]:
+                            if best_local is None or score < best_local["score2"]:
                                 best_local = cand
                 else:
                     for Q_total_m3h in Q_list:
