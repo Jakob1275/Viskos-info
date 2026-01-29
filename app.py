@@ -1106,6 +1106,8 @@ def choose_best_mph_pump_autoQ(pumps, gas_target_norm_lmin, p_suction_bar_abs, T
                                 "p_req": req.get("p_req"),
                                 "Q_m3h": Q_total_m3h,
                                 "P_req": P_req,
+                                "n_rpm": pump["n0_rpm"],
+                                "mode": "Nenndrehzahl",
                                 "score": score,
                                 "score2": score,
                                 "solution_status": "strict",
