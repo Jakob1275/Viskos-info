@@ -985,6 +985,10 @@ def choose_best_mph_pump_autoQ(
         Q_liq_lmin_base = max(m3h_to_lmin(Q_liq_m3h_base), 1e-12)
         C_target_cm3N_L = (1000.0 * gas_target_norm_lmin) / max(Q_liq_lmin_base, 1e-12)
 
+        # Debug-Ausgabe für 50 l/min
+        if abs(gas_target_norm_lmin - 50.0) < 1e-3:
+            print(f"[DEBUG] 50 l/min: Q_total_m3h={Q_total_m3h:.3f}, Q_liq_m3h_base={Q_liq_m3h_base:.3f}, Q_liq_lmin_base={Q_liq_lmin_base:.3f}, C_target_cm3N_L={C_target_cm3N_L:.3f}")
+
         if gas_medium == "Luft":
             p_req, targets = pressure_required_for_air_components(T_celsius, C_target_cm3N_L, p_min=0.2, p_max=200.0)
         else:
@@ -1120,6 +1124,10 @@ def choose_best_mph_pump_autoQ(
                             Q_gas_norm_lmin_check = gas_flow_from_concentration(C_dissolved, Q_liq_m3h)
                             # Target concentration (from user target)
                             C_ziel = float(gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12) * 1000.0
+
+                            # Debug-Ausgabe für 50 l/min
+                            if abs(gas_target_norm_lmin - 50.0) < 1e-3:
+                                print(f"[DEBUG] 50 l/min: Q_total_m3h={Q_total_m3h:.3f}, Q_liq_m3h={Q_liq_m3h:.3f}, Q_liq_lmin={Q_liq_lmin:.3f}, C_dissolved={C_dissolved:.3f}, C_sat_total={C_sat_total:.3f}, C_ziel={C_ziel:.3f}, Q_gas_norm_lmin={Q_gas_norm_lmin:.3f}")
                             # Only allow if all gas can be dissolved at discharge and target is met
                             # Debug: Filtergründe ausgeben
                             if C_dissolved < C_ziel:
