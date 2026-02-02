@@ -1064,6 +1064,7 @@ def choose_best_mph_pump_autoQ(
             Q_candidates = np.linspace(qmin, qmax, n_coarse)
 
             def _scan_candidates(Q_list, best_local=None, relaxed=False):
+                debug_50_printed = False
                 if allow_partial_solution:
                     gvf_max_pct = min(30.0, pump["GVF_max"] * 100.0)
                     keys = sorted(pump["curves_dp_vs_Q"].keys())
@@ -1125,9 +1126,10 @@ def choose_best_mph_pump_autoQ(
                             # Target concentration (from user target)
                             C_ziel = float(gas_target_norm_lmin) / max(Q_liq_lmin, 1e-12) * 1000.0
 
-                            # Debug-Ausgabe für 50 l/min
-                            if abs(gas_target_norm_lmin - 50.0) < 1e-3:
+                            # Debug-Ausgabe für 50 l/min: nur einmal pro Berechnung
+                            if (not debug_50_printed) and abs(gas_target_norm_lmin - 50.0) < 1e-3:
                                 st.info(f"[DEBUG] 50 l/min: Q_total_m3h={Q_total_m3h:.3f}, Q_liq_m3h={Q_liq_m3h:.3f}, Q_liq_lmin={Q_liq_lmin:.3f}, C_dissolved={C_dissolved:.3f}, C_sat_total={C_sat_total:.3f}, C_ziel={C_ziel:.3f}, Q_gas_norm_lmin={Q_gas_norm_lmin:.3f}")
+                                debug_50_printed = True
                             # Neue Logik: Zielmenge als Sättigung interpretieren
                             # Die Pumpe ist geeignet, wenn C_sat_total >= C_ziel (Zielmenge kann als Sättigung gelöst werden)
                             if C_sat_total < C_ziel:
