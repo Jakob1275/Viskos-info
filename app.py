@@ -33,7 +33,7 @@ P_SUCTION_FIXED_BAR_ABS = 0.6
 SAT_PENALTY_WEIGHT = 1.5
 AIR_SOLUBILITY_REF_T_C = 20.0
 AIR_SOLUBILITY_REF_P_BAR = 5.0
-AIR_SOLUBILITY_REF_C_CM3N_L = 122.7
+AIR_SOLUBILITY_REF_C_CM3N_L = 92.0  # Entspricht Tabellenwert bei 5 bar, 20°C (keine Skalierung)
 AIR_SOLUBILITY_REF_TABLE = [
     (2.0, 36.8),
     (2.5, 46.0),
@@ -1548,7 +1548,7 @@ def run_multi_phase_pump():
         if solution_status == "partial":
             st.warning("Hinweis: Q_gas_ziel ist mit den Kennlinien nicht vollständig lösbar. Es wird die bestmögliche Annäherung angezeigt.")
 
-        with st.expander("Debug -“ Mehrphasen-‘Zwischengrößen"):
+        with st.expander("Debug - Mehrphasen-Zwischengrößen"):
             if best_pump:
                 # Neue Variablen aus der korrigierten Logik
                 Q_liq_m3h_dbg = float(best_pump.get("Q_liq_m3h", best_pump.get("Q_m3h", 0.0)))
@@ -2318,4 +2318,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
