@@ -224,7 +224,7 @@ MPH_PUMPS = [
         "power_kW_vs_Q": {
             0: {"Q": [0, 10, 15, 20, 25, 30, 35, 40, 45], "P": [7.0, 9.0, 10.0, 11.0, 11.8, 12.2, 13.0, 13.8, 14.0]},
             5: {"Q": [10, 15, 20, 25, 30, 35, 40, 45], "P": [8.8, 9.0, 11.0, 13.0, 11.8, 12, 13.5, 14.0]},
-            10: {"Q": [10, 15, 20, 25, 30, 35, 40], "P": [8.5, 8.5, 11.5, 11.0, 12.0]},
+            10: {"Q": [10, 15, 20, 25, 30, 35, 40], "P": [8.5, 8.5, 10.0, 10.5, 11.0, 11.5, 12.0]},
             15: {"Q": [10, 15, 20, 25, 30, 35], "P": [8.3, 8.7, 9.2, 9.9, 10.8, 11.5]},
             20: {"Q": [10, 15, 20, 25, 30], "P": [8, 9, 9.5, 10, 10.3]},
         },
@@ -1164,8 +1164,8 @@ def run_single_phase_pump():
             with colB:
                 st.subheader("Medium")
                 medium = st.selectbox("Medium", list(MEDIA.keys()), index=0)
-                rho = st.number_input("Dichte Ï [kg/m³]", min_value=1.0, value=float(MEDIA[medium]["rho"]), step=5.0)
-                nu = st.number_input("Kinematische Viskosität Î½ [cSt]", min_value=0.1, value=float(MEDIA[medium]["nu"]), step=0.5)
+                rho = st.number_input("Dichte [kg/m³]", min_value=1.0, value=float(MEDIA[medium]["rho"]), step=5.0)
+                nu = st.number_input("Kinematische Viskosität ν [cSt]", min_value=0.1, value=float(MEDIA[medium]["nu"]), step=0.5)
             with colC:
                 st.subheader("Optionen")
                 allow_out = st.checkbox("Auswahl außerhalb Kennlinie zulassen", value=True)
@@ -1402,9 +1402,9 @@ def run_multi_phase_pump():
     - Rechenweg ergänzt
     """
     try:
-        st.header("Mehrphasenpumpen-Auslegung (Q automatisch, Ziel-‘Gasstrom über Druckseite)")
+        st.header("Mehrphasenpumpen-Auslegung (Q automatisch, Ziel-Gasstrom über Druckseite)")
 
-        with st.expander("Eingaben -“ aufklappen", expanded=True):
+        with st.expander("Eingaben - aufklappen", expanded=True):
             c1, c2, c3 = st.columns([1, 1, 1])
 
             with c1:
@@ -1419,7 +1419,7 @@ def run_multi_phase_pump():
                 st.subheader("Gas / Medium / Temperatur")
                 gas_medium = st.selectbox("Gas", list(HENRY_CONSTANTS.keys()), index=0)
                 liquid_medium = st.selectbox("Flüssigmedium", list(MEDIA.keys()), index=0)
-                temperature = st.number_input("Temperatur T [Â°C]", min_value=-10.0, value=20.0, step=1.0)
+                temperature = st.number_input("Temperatur T [°C]", min_value=-10.0, value=20.0, step=1.0)
 
             with c3:
                 st.subheader("Optionen")
@@ -1591,9 +1591,9 @@ def run_multi_phase_pump():
                 with col_gas2:
                     st.metric("Q_gas_lösbar (bei p_aus)", f"{Q_gas_losbar_dbg:.2f}")
                     if alles_geloest:
-                        st.success(f"âœ… Freies Gas: {Q_gas_free_dbg:.2f} (alles lösbar)")
+                        st.success(f"Freies Gas: {Q_gas_free_dbg:.2f} (alles lösbar)")
                     else:
-                        st.error(f"âŒ Freies Gas: {Q_gas_free_dbg:.2f}")
+                        st.error(f"Freies Gas: {Q_gas_free_dbg:.2f}")
 
                 st.markdown("**Konzentrationen (cm³N/L):**")
                 st.write({
@@ -1628,7 +1628,7 @@ def run_multi_phase_pump():
                 st.info("Kein Q verfügbar (keine Pumpe gefunden).")
         with r4:
             if p_req is None:
-                st.warning("p_req nicht erreichbar -“ Ziel zu hoch im Modell.")
+                st.warning("p_req nicht erreichbar - Ziel zu hoch im Modell.")
             else:
                 st.metric("p_austritt [bar abs]", f"{p_req:.2f}")
                 st.metric("Î”p", f"{dp_req_bar:.2f} bar")
@@ -1639,7 +1639,7 @@ def run_multi_phase_pump():
             C_sat_disp = float(best_pump.get("C_sat_discharge", 0.0))
             C_free_disp = float(best_pump.get("C_free", 0.0))
             
-            st.success(f"âœ… Empfohlene Pumpe: {best_pump['pump']['id']}")
+            st.success(f"Empfohlene Pumpe: {best_pump['pump']['id']}")
             Q_liq_req_sel = float(best_pump.get("Q_liq_m3h", best_pump["Q_m3h"]))
             
             p1, p2, p3, p4 = st.columns(4)
@@ -1880,7 +1880,7 @@ def run_multi_phase_pump():
             ax2.scatter(Q_lmin_sel, H_avail_plot, s=110, marker="x", label="Betriebspunkt (auf Kennlinie)")
             ax2.scatter(Q_lmin_sel, H_req_plot, s=70, marker="o", facecolors="none", edgecolors="black", label="Anforderung (p_req)")
             ax2.set_xlabel("Volumenstrom [L/min]")
-            ax2.set_ylabel("Î”p [bar]")
+            ax2.set_ylabel("Î_p [bar]")
             ax2.set_title(f"Mehrphasen-Kennlinien: {pump['id']}")
             ax2.grid(True)
             ax2.legend()
@@ -1889,7 +1889,7 @@ def run_multi_phase_pump():
         else:
             ax2.text(0.5, 0.5, "Keine geeignete Pumpe / kein p_req", ha="center", va="center", transform=ax2.transAxes)
             ax2.set_xlabel("Volumenstrom [L/min]")
-            ax2.set_ylabel("Î”p [bar]")
+            ax2.set_ylabel("Î_p [bar]")
             ax2.set_title("Mehrphasen-Kennlinien")
             ax2.grid(True)
 
@@ -2011,37 +2011,48 @@ def run_multi_phase_pump():
             ax3.scatter([p_bp], [Q_gas_norm_bp], s=120, color="red", marker="X", 
                        zorder=10, label="Betriebspunkt")
 
-            # Ausgewählte Pumpenkennlinie (interpoliert) einzeichnen:
+            # Ausgewählte (interpolierte) Pumpenkennlinie einzeichnen:
             conc_sel = float(best_pump.get("conc_pct", 0.0))
             if conc_sel > 0:
-                # Hole die Q-dp Kurve für die ausgewählte Konzentration
-                lo_key, hi_key, t_interp = _interp_between_gvf_keys(pump, conc_sel)
-                curve_lo = pump["curves_dp_vs_Q"][lo_key]
-                curve_hi = pump["curves_dp_vs_Q"][hi_key]
-                Q_lo, dp_lo = align_xy(curve_lo["Q"], curve_lo["dp"])
-                Q_hi, dp_hi = align_xy(curve_hi["Q"], curve_hi["dp"])
-                
-                # Interpoliere zwischen den Kurven
-                Q_sel = Q_lo  # Q-Werte sollten gleich sein
-                dp_sel = [dp_lo[i] * (1 - t_interp) + dp_hi[i] * t_interp for i in range(len(dp_lo))]
-                
-                # Skaliere mit Drehzahl
-                Q_sel = [q * n_ratio_sel for q in Q_sel]
-                dp_sel = [dp * (n_ratio_sel ** 2) for dp in dp_sel]
-                
-                # Berechne p_abs und Q_gas_norm für jeden Punkt
-                C_sel_cm3N_L = (conc_sel / 100.0) * 1000.0
-                p_abs_sel = []
-                Q_gas_sel = []
-                for Q_liq, dp in zip(Q_sel, dp_sel):
-                    p_discharge = float(p_suction) + dp
-                    Q_liq_lmin = m3h_to_lmin(Q_liq)
-                    Q_gas_norm = (C_sel_cm3N_L / 1000.0) * Q_liq_lmin
-                    p_abs_sel.append(p_discharge)
-                    Q_gas_sel.append(Q_gas_norm)
-                
-                ax3.plot(p_abs_sel, Q_gas_sel, "-", linewidth=2.5, color="red", alpha=0.8,
-                        label=f"Ausgewählte Kennlinie ({conc_sel:.1f}%)")
+                try:
+                    # Finde die passenden Nachbar-Kennlinien
+                    lo_key, hi_key, t_interp = _interp_between_gvf_keys(pump, conc_sel)
+                    curve_lo = pump["curves_dp_vs_Q"][lo_key]
+                    curve_hi = pump["curves_dp_vs_Q"][hi_key]
+                    
+                    # Gemeinsamer Q-Bereich (Schnittmenge)
+                    Q_lo = list(map(float, curve_lo["Q"]))
+                    Q_hi = list(map(float, curve_hi["Q"]))
+                    q_min = max(min(Q_lo), min(Q_hi))
+                    q_max = min(max(Q_lo), max(Q_hi))
+                    
+                    # Q-Punkte im gemeinsamen Bereich
+                    Q_common = [q for q in Q_lo if q_min <= q <= q_max]
+                    if len(Q_common) < 2:
+                        Q_common = np.linspace(q_min, q_max, 10).tolist()
+                    
+                    # Interpolierte dp-Werte
+                    dp_sel = [_dp_at_Q_gvf(pump, q, conc_sel)[0] for q in Q_common]
+                    
+                    # Skaliere mit Drehzahl
+                    Q_sel = [q * n_ratio_sel for q in Q_common]
+                    dp_sel = [dp * (n_ratio_sel ** 2) for dp in dp_sel]
+                    
+                    # Berechne p_abs und Q_gas_norm
+                    C_sel_cm3N_L = (conc_sel / 100.0) * 1000.0
+                    p_abs_sel = []
+                    Q_gas_sel = []
+                    for Q_liq, dp in zip(Q_sel, dp_sel):
+                        p_discharge = float(p_suction) + dp
+                        Q_liq_lmin = m3h_to_lmin(Q_liq)
+                        Q_gas_norm = (C_sel_cm3N_L / 1000.0) * Q_liq_lmin
+                        p_abs_sel.append(p_discharge)
+                        Q_gas_sel.append(Q_gas_norm)
+                    
+                    ax3.plot(p_abs_sel, Q_gas_sel, "-", linewidth=2.5, color="red", alpha=0.8,
+                            label=f"Betriebskennlinie ({conc_sel:.1f}%)")
+                except Exception:
+                    pass  # Falls Interpolation fehlschlägt, nur Betriebspunkt zeigen
 
         ax3.legend(loc="best")
 
@@ -2280,7 +2291,7 @@ th {{ background-color: #f2f2f2; }}
 
 def main():
     try:
-        st.title("ðŸ”§ Pumpenauslegungstool")
+        st.title("Pumpenauslegungstool")
 
         with st.sidebar:
             st.header("Navigation")
