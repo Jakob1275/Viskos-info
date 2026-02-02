@@ -1680,19 +1680,6 @@ def run_multi_phase_pump():
                     "C_sat (bei p_aus)": round(C_sat_dbg, 2),
                 })
 
-                issues_dbg = validate_gvf_consistency(
-                    Q_total_m3h=Q_total_m3h_dbg,
-                    gvf_pct=gvf_curve_pct,
-                    p_bar_abs=p_dbg,
-                    T_celsius=temperature,
-                    gas=gas_medium,
-                    Q_gas_norm_lmin=Q_gas_pump_dbg
-                )
-                if issues_dbg:
-                    st.warning("Validierung (Debug): " + " ".join(issues_dbg))
-            else:
-                st.info("Kein gültiger Betriebspunkt für Debug‑Ausgabe.")
-
         Q_total_m3h_sel = float(best_pump["Q_m3h"]) if best_pump else None
         Q_liq_m3h_sel = None
         if Q_total_m3h_sel is not None and best_pump:
