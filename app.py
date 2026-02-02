@@ -71,10 +71,10 @@ MEDIA = {
 }
 
 HENRY_CONSTANTS = {
-    "Luft": {"A": 1400.0, "B": 1500},
-    "N2": {"A": 1600.0, "B": 1400},
-    "O2": {"A": 1200.0, "B": 1600},
-    "CO2": {"A": 29.0, "B": 2400},
+    "Luft": {"A": 800.0, "B": 1500},   
+    "N2": {"A": 900.0, "B": 1400},    
+    "O2": {"A": 700.0, "B": 1600},    
+    "CO2": {"A": 29.0, "B": 2400},    
 }
 
 AIR_COMPONENTS = [
@@ -1567,7 +1567,7 @@ def run_multi_phase_pump():
             Q_liq_m3h_chk, Q_gas_oper_m3h_chk = gvf_to_flow_split(Q_total_m3h_chk, gvf_curve_pct)
             Q_gas_pump_norm_chk = gas_oper_m3h_to_norm_lmin(
                 Q_gas_oper_m3h_chk,
-                p_dis_chk,
+                p_suction,
                 temperature,
                 gas_medium
             )
