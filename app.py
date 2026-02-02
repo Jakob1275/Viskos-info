@@ -2083,7 +2083,7 @@ def run_multi_phase_pump():
             gvf_plot = float(gvf_curve_pct)
             n_ratio_sel = float(best_pump.get("n_ratio", 1.0))
 
-            # Plot Pumpenkennlinie als Q_gas = Q_liq * C_kennlinie / 60
+            # Plot Pumpenkennlinien: Freies Gas @ Saugseite → Norm L/min
             kennlinien_keys = sorted(pump["curves_dp_vs_Q"].keys())
             for gvf_key in kennlinien_keys:
                 if gvf_key <= 30:
@@ -2091,21 +2091,37 @@ def run_multi_phase_pump():
                     Q_curve, dp_curve = align_xy(curve["Q"], curve["dp"])
                     Q_curve = [q * n_ratio_sel for q in Q_curve]
                     dp_curve = [dp * (n_ratio_sel ** 2) for dp in dp_curve]
-                    p_abs = [float(p_suction) + dp for dp in dp_curve]
-                    C_kennlinie = dissolved_concentration_cm3N_L_from_pct(gvf_key)
-                    Q_gas_curve = [(q * C_kennlinie) / 60.0 for q in Q_curve]
-                    ax3.plot(p_abs, Q_gas_curve, "--", alpha=0.5, label=f"Kennlinie {gvf_key:.0f}% ({C_kennlinie:.0f} cm³N/L)")
-
-            # Betriebspunkt markieren
-            Q_liq_bp, _ = gvf_to_flow_split(Q_total_m3h_sel_plot, gvf_plot)
-            C_kennlinie_bp = dissolved_concentration_cm3N_L_from_pct(gvf_plot)
-            Q_gas_bp = Q_liq_bp * C_kennlinie_bp / 60.0
+            
+                    # Für jeden Punkt auf der Kennlinie:
+                    p_abs_curve = []
+                    Q_gas_norm_curve = []
+                    
+                    for Q_total, dp in zip(Q_curve, dp_curve):
+                        # Druckseite:
+                        p_discharge = float(p_suction) + dp
+                
+                        # Freies Gas @ Saugseite (GVF):
+                        Q_liq, Q_gas_oper = gvf_to_flow_split(Q_total, gvf_key)
+                            
+                        # Umrechnung auf Norm (Saugbedingungen):
+                        Q_gas_norm = gas_oper_m3h_to_norm_lmin(
+                            Q_gas_oper, p_suction, temperature, gas_medium
+                        )
+                
+                        p_abs_curve.append(p_discharge)
+                        Q_gas_norm_curve.append(Q_gas_norm)
+            
+                    ax3.plot(p_abs_curve, Q_gas_norm_curve, "--", alpha=0.5, 
+                            label=f"Kennlinie GVF={gvf_key:.0f}%")
+            
+            # Betriebspunkt markieren (korrigiert):
+            Q_liq_bp, Q_gas_oper_bp = gvf_to_flow_split(Q_total_m3h_sel_plot, gvf_plot)
+            Q_gas_norm_bp = gas_oper_m3h_to_norm_lmin(
+                Q_gas_oper_bp, p_suction, temperature, gas_medium
+            )
             p_bp = float(p_suction) + float(best_pump["dp_avail"])
-            ax3.scatter([p_bp], [Q_gas_bp], s=80, color="tab:red", marker="x", label="Betriebspunkt (Kennlinie)")
-
-        # Schnittpunkt: Pumpenkennlinie vs. Löslichkeitskennlinie (L/min)
-        # (Falls benötigt, hier ggf. anpassen und korrekt einrücken)
-        # (Code entfernt, da nicht mehr benötigt oder zu refaktorisieren)
+            ax3.scatter([p_bp], [Q_gas_norm_bp], s=80, color="tab:red", marker="x", 
+                       label="Betriebspunkt (Gas @ Saugseite)")
 
         ax3.legend(loc="best")
 
