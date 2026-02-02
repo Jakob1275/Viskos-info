@@ -207,7 +207,7 @@ MPH_PUMPS = [
     {
         "id": "MPH-603",
         "type": "Mehrphasenpumpe",
-        "Q_max_m3h": 45,
+        "Q_max_m3h": 50,
         "dp_max_bar": 12.0,
         "GVF_max": 0.2,
         "n0_rpm": 2900,
