@@ -1128,19 +1128,15 @@ def choose_best_mph_pump_autoQ(
                             # Debug-Ausgabe für 50 l/min
                             if abs(gas_target_norm_lmin - 50.0) < 1e-3:
                                 st.info(f"[DEBUG] 50 l/min: Q_total_m3h={Q_total_m3h:.3f}, Q_liq_m3h={Q_liq_m3h:.3f}, Q_liq_lmin={Q_liq_lmin:.3f}, C_dissolved={C_dissolved:.3f}, C_sat_total={C_sat_total:.3f}, C_ziel={C_ziel:.3f}, Q_gas_norm_lmin={Q_gas_norm_lmin:.3f}")
-                            # Only allow if all gas can be dissolved at discharge and target is met
-                            # Debug: Filtergründe ausgeben
-                            if C_dissolved < C_ziel:
+                            # Neue Logik: Zielmenge als Sättigung interpretieren
+                            # Die Pumpe ist geeignet, wenn C_sat_total >= C_ziel (Zielmenge kann als Sättigung gelöst werden)
+                            if C_sat_total < C_ziel:
                                 if DEBUG:
-                                    print(f"Kandidat verworfen: C_dissolved < C_ziel | C_dissolved={C_dissolved:.2f} < C_ziel={C_ziel:.2f} | Q_gas_norm_lmin={Q_gas_norm_lmin:.2f} | Q_liq_lmin={Q_liq_lmin:.2f} | GVF={gvf_c:.2f}")
-                                continue
-                            if C_dissolved > C_sat_total:
-                                if DEBUG:
-                                    print(f"Kandidat verworfen: C_dissolved > C_sat_total | C_dissolved={C_dissolved:.2f} > C_sat_total={C_sat_total:.2f} | p_discharge={p_discharge:.2f} | Q_gas_norm_lmin={Q_gas_norm_lmin:.2f} | Q_liq_lmin={Q_liq_lmin:.2f} | GVF={gvf_c:.2f}")
+                                    st.info(f"Kandidat verworfen: C_sat_total < C_ziel | C_sat_total={C_sat_total:.2f} < C_ziel={C_ziel:.2f} | p_discharge={p_discharge:.2f} | Q_liq_lmin={Q_liq_lmin:.2f} | GVF={gvf_c:.2f}")
                                 continue
 
-                            # Score: Je näher an der Zielkonzentration, desto besser (Abweichung minimal)
-                            score = abs(C_dissolved - C_ziel)
+                            # Score: Je näher C_sat_total an C_ziel, desto besser (minimale Überschreitung)
+                            score = abs(C_sat_total - C_ziel)
                             # Hydraulische Leistung (kW): P_hyd = dp_avail [bar] * Q_total_m3h / 36
                             P_req = (dp_avail * Q_total_m3h) / 36.0
                             cand = {
@@ -2390,3 +2386,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
