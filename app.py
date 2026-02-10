@@ -864,16 +864,16 @@ def render_project_header():
         
         with st.expander("📋 Projektdaten", expanded=False):
             st.session_state.project.project_id = st.text_input(
-                "Projekt-ID", value=st.session_state.project.project_id, placeholder="PRJ-2024-001")
-            st.session_state.project.project_name = st.text_input(
-                "Projektname", value=st.session_state.project.project_name)
-            st.session_state.project.customer = st.text_input(
-                "Kunde", value=st.session_state.project.customer)
-            st.session_state.project.engineer = st.text_input(
-                "Bearbeiter", value=st.session_state.project.engineer)
-            st.session_state.project.revision = st.text_input(
-                "Revision", value=st.session_state.project.revision)
-            st.session_state.project.standard = st.selectbox(
+                "Projekt-ID", value=st.session.state.project.project_id, placeholder="PRJ-2024-001")
+            st.session.state.project.project_name = st.text_input(
+                "Projektname", value=st.session.state.project.project_name)
+            st.session.state.project.customer = st.text_input(
+                "Kunde", value=st.session.state.project.customer)
+            st.session.state.project.engineer = st.text_input(
+                "Bearbeiter", value=st.session.state.project.engineer)
+            st.session.state.project.revision = st.text_input(
+                "Revision", value=st.session.state.project.revision)
+            st.session.state.project.standard = st.selectbox(
                 "Auslegungsnorm", [s.value for s in PumpStandard], index=1)
 
 def run_single_phase_pump():
@@ -889,8 +889,8 @@ def run_single_phase_pump():
                 st.subheader("Betriebspunkt")
                 Q_vis_req = st.number_input("Förderstrom Q [m³/h]", min_value=0.1, value=30.0, step=1.0)
                 H_vis_req = st.number_input("Förderhöhe H [m]", min_value=0.1, value=20.0, step=1.0)
-                st.session_state.process.flow_rate_m3h = Q_vis_req
-                st.session_state.process.head_m = H_vis_req
+                st.session.state.process.flow_rate_m3h = Q_vis_req
+                st.session.state.process.head_m = H_vis_req
                 
             with col2:
                 st.subheader("Medium")
@@ -1195,25 +1195,15 @@ def run_multi_phase_pump():
         
         # === BERECHNUNG ===
         Q_gas_with_safety = Q_gas_target_lmin * (1 + safety_margin_pct / 100.0)
-        
-        # Gas-Löslichkeit bei verschiedenen Drücken berechnen
-        p_discharge_min = p_suction + 2.0
-        p_discharge_max = p_suction + 12.0
-        
-        # Finde besten Betriebspunkt für jede Pumpe
         results = []
         
         for pump in MPH_PUMPS:
-            # Prüfe Viskosität und Dichte
             if nu_liq > pump.get("max_viscosity", 500):
                 continue
             if rho_liq > pump.get("max_density", 1200):
                 continue
             
-            # Verfügbare GVF-Kennlinien
             gvf_keys = sorted(pump["curves_dp_vs_Q"].keys())
-            
-            # Scanne mögliche Betriebspunkte
             best_for_pump = None
             
             for gvf_pct in (gvf_keys if not use_interpolation else 
@@ -1402,6 +1392,7 @@ def run_multi_phase_pump():
             
             best = results[0]
             pump = best["pump"]
+            P_motor_iec = motor_iec(best['P_shaft_kW'] * 1.15)
             
             fig, axes = plt.subplots(2, 2, figsize=(14, 10))
             
@@ -1412,80 +1403,66 @@ def run_multi_phase_pump():
             
             for gvf, color in zip(gvf_keys, colors):
                 curve = pump["curves_dp_vs_Q"][gvf]
-                ax1.plot(curve["Q"], curve["dp"], "-o", color=color, 
-                        label=f"GVF {gvf}%", linewidth=2, markersize=4)
+                # Arrays alignen für sicheres Plotten
+                q_vals, dp_vals = align_xy(curve["Q"], curve["dp"])
+                if len(q_vals) >= 2:
+                    ax1.plot(q_vals, dp_vals, "-o", color=color, 
+                            label=f"GVF {gvf}%", linewidth=2, markersize=4)
             
-            # Betriebspunkt einzeichnen
             ax1.scatter([best["Q_liq_m3h"]], [best["dp_bar"]], 
                        s=200, c="red", marker="★", zorder=10, label="Betriebspunkt")
             ax1.axhline(best["dp_bar"], color="red", linestyle="--", alpha=0.5)
             ax1.axvline(best["Q_liq_m3h"], color="red", linestyle="--", alpha=0.5)
-            
-            ax1.set_xlabel("Q [m³/h]")
-            ax1.set_ylabel("Δp [bar]")
+            ax1.set_xlabel("Q [m³/h]"); ax1.set_ylabel("Δp [bar]")
             ax1.set_title(f"{pump['id']} - Druckerhöhung vs. Volumenstrom")
-            ax1.legend(loc="best", fontsize=8)
-            ax1.grid(True, alpha=0.3)
+            ax1.legend(loc="best", fontsize=8); ax1.grid(True, alpha=0.3)
             
             # 2. Q-P Kennlinien
             ax2 = axes[0, 1]
             for gvf, color in zip(gvf_keys, colors):
                 if gvf in pump["power_kW_vs_Q"]:
                     curve = pump["power_kW_vs_Q"][gvf]
-                    ax2.plot(curve["Q"], curve["P"], "-s", color=color,
-                            label=f"GVF {gvf}%", linewidth=2, markersize=4)
+                    # Arrays alignen für sicheres Plotten
+                    q_vals, p_vals = align_xy(curve["Q"], curve["P"])
+                    if len(q_vals) >= 2:
+                        ax2.plot(q_vals, p_vals, "-s", color=color,
+                                label=f"GVF {gvf}%", linewidth=2, markersize=4)
             
             ax2.scatter([best["Q_liq_m3h"]], [best["P_shaft_kW"]], 
                        s=200, c="red", marker="★", zorder=10)
             ax2.axhline(P_motor_iec, color="green", linestyle="--", 
                        label=f"Motor {P_motor_iec} kW")
-            
-            ax2.set_xlabel("Q [m³/h]")
-            ax2.set_ylabel("P [kW]")
+            ax2.set_xlabel("Q [m³/h]"); ax2.set_ylabel("P [kW]")
             ax2.set_title("Leistungsaufnahme vs. Volumenstrom")
-            ax2.legend(loc="best", fontsize=8)
-            ax2.grid(True, alpha=0.3)
+            ax2.legend(loc="best", fontsize=8); ax2.grid(True, alpha=0.3)
             
             # 3. Gas-Löslichkeit vs. Druck
             ax3 = axes[1, 0]
             p_range = np.linspace(1, 12, 50)
             C_sat_curve = [gas_solubility_total_cm3N_L(gas_medium, p, temperature) for p in p_range]
-            
             ax3.plot(p_range, C_sat_curve, "b-", linewidth=2, label=f"{gas_medium} Löslichkeit")
             ax3.axvline(best["p_discharge"], color="red", linestyle="--", 
                        label=f"Austrittsdruck {best['p_discharge']:.1f} bar")
             ax3.axhline(best["C_sat_discharge"], color="red", linestyle=":", alpha=0.7)
             ax3.scatter([best["p_discharge"]], [best["C_sat_discharge"]], 
                        s=150, c="red", marker="★", zorder=10)
-            
-            # Zielkonzentration einzeichnen
             C_target = (Q_gas_with_safety / m3h_to_lmin(best["Q_liq_m3h"])) * 1000 if best["Q_liq_m3h"] > 0 else 0
             ax3.axhline(C_target, color="orange", linestyle="-.", 
-                       label=f"Ziel-Konzentration {C_target:.0f} cm³N/L")
-            
-            ax3.set_xlabel("Druck [bar(a)]")
-            ax3.set_ylabel("Sättigungskonzentration [cm³N/L]")
+                       label=f"Ziel {C_target:.0f} cm³N/L")
+            ax3.set_xlabel("Druck [bar(a)]"); ax3.set_ylabel("C_sat [cm³N/L]")
             ax3.set_title(f"Gas-Löslichkeit ({gas_medium}, {temperature}°C)")
-            ax3.legend(loc="best", fontsize=8)
-            ax3.grid(True, alpha=0.3)
-            ax3.set_xlim(0, 14)
+            ax3.legend(loc="best", fontsize=8); ax3.grid(True, alpha=0.3); ax3.set_xlim(0, 14)
             
-            # 4. Übersicht aller Pumpen
+            # 4. Pumpenvergleich
             ax4 = axes[1, 1]
-            pump_names = [r["pump_id"] for r in results]
-            scores = [r["score"] for r in results]
-            colors_bar = ["green" if r["solvable"] else "orange" for r in results]
-            
-            bars = ax4.barh(pump_names, scores, color=colors_bar, alpha=0.7)
-            ax4.set_xlabel("Score (niedriger = besser)")
-            ax4.set_title("Pumpenvergleich")
-            ax4.invert_yaxis()
-            
-            # Legende für Farben
-            from matplotlib.patches import Patch
-            legend_elements = [Patch(facecolor='green', alpha=0.7, label='Vollständig löslich'),
-                              Patch(facecolor='orange', alpha=0.7, label='Teilweise übersättigt')]
-            ax4.legend(handles=legend_elements, loc='lower right')
+            if results:
+                pump_names = [r["pump_id"] for r in results]
+                scores = [r["score"] for r in results]
+                colors_bar = ["green" if r["solvable"] else "orange" for r in results]
+                ax4.barh(pump_names, scores, color=colors_bar, alpha=0.7)
+                ax4.set_xlabel("Score (niedriger = besser)")
+                ax4.set_title("Pumpenvergleich")
+                ax4.invert_yaxis()
             
             plt.tight_layout()
             st.pyplot(fig)
@@ -1580,20 +1557,17 @@ def run_atex_selection():
                     gas_group = st.selectbox("Gasgruppe", 
                         options=["IIA", "IIB", "IIC"],
                         index=2,
-                        help="IIA: Propan, IIB: Ethylen, IIC: Wasserstoff/Acetylen"
-                    )
+                        help="IIA: Propan, IIB: Ethylen, IIC: Wasserstoff/Acetylen")
                 else:
                     zone = st.selectbox("Zone", 
                         options=[20, 21, 22],
-                        format_func=lambda x: f"Zone {x} - {'Ständig' if x==20 else 'Gelegentlich' if x==21 else 'Selten'}"
-                    )
+                        format_func=lambda x: f"Zone {x} - {'Ständig' if x==20 else 'Gelegentlich' if x==21 else 'Selten'}")
                     gas_group = "IIIC"  # Staub
                 
                 temp_class = st.selectbox("Temperaturklasse",
                     options=["T1", "T2", "T3", "T4", "T5", "T6"],
                     index=3,
-                    help="T1: 450°C, T2: 300°C, T3: 200°C, T4: 135°C, T5: 100°C, T6: 85°C"
-                )
+                    help="T1: 450°C, T2: 300°C, T3: 200°C, T4: 135°C, T5: 100°C, T6: 85°C")
             
             with col3:
                 st.subheader("Umgebungsbedingungen")
@@ -1643,7 +1617,6 @@ def run_atex_selection():
                 # Temperaturprüfung
                 if motor["t_max_surface"] > t_max_allowed:
                     continue
-                # Passend!
                 suitable_motors.append(motor)
             
             # Ergebnisse
@@ -1872,5 +1845,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
