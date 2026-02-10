@@ -866,14 +866,14 @@ def render_project_header():
             st.session_state.project.project_id = st.text_input(
                 "Projekt-ID", value=st.session_state.project.project_id, placeholder="PRJ-2024-001")
             st.session_state.project.project_name = st.text_input(
-                "Projektname", value=st.session.state.project.project_name)
-            st.session.state.project.customer = st.text_input(
-                "Kunde", value=st.session.state.project.customer)
-            st.session.state.project.engineer = st.text_input(
-                "Bearbeiter", value=st.session.state.project.engineer)
-            st.session.state.project.revision = st.text_input(
-                "Revision", value=st.session.state.project.revision)
-            st.session.state.project.standard = st.selectbox(
+                "Projektname", value=st.session_state.project.project_name)
+            st.session_state.project.customer = st.text_input(
+                "Kunde", value=st.session_state.project.customer)
+            st.session_state.project.engineer = st.text_input(
+                "Bearbeiter", value=st.session_state.project.engineer)
+            st.session_state.project.revision = st.text_input(
+                "Revision", value=st.session_state.project.revision)
+            st.session_state.project.standard = st.selectbox(
                 "Auslegungsnorm", [s.value for s in PumpStandard], index=1)
 
 def run_single_phase_pump():
@@ -889,8 +889,8 @@ def run_single_phase_pump():
                 st.subheader("Betriebspunkt")
                 Q_vis_req = st.number_input("Förderstrom Q [m³/h]", min_value=0.1, value=30.0, step=1.0)
                 H_vis_req = st.number_input("Förderhöhe H [m]", min_value=0.1, value=20.0, step=1.0)
-                st.session.state.process.flow_rate_m3h = Q_vis_req
-                st.session.state.process.head_m = H_vis_req
+                st.session_state.process.flow_rate_m3h = Q_vis_req
+                st.session_state.process.head_m = H_vis_req
                 
             with col2:
                 st.subheader("Medium")
@@ -903,10 +903,10 @@ def run_single_phase_pump():
                 p_vapor = st.number_input("Dampfdruck [bar(a)]", min_value=0.0, 
                                           value=float(MEDIA[medium].get("vapor_pressure_20c", 0.023)), 
                                           step=0.01, format="%.4f")
-                st.session.state.process.density_kg_m3 = rho
-                st.session.state.process.viscosity_cst = nu
-                st.session.state.process.temperature_c = T_proc
-                st.session.state.process.vapor_pressure_bar = p_vapor
+                st.session_state.process.density_kg_m3 = rho
+                st.session_state.process.viscosity_cst = nu
+                st.session_state.process.temperature_c = T_proc
+                st.session_state.process.vapor_pressure_bar = p_vapor
                 
             with col3:
                 st.subheader("Optionen")
@@ -921,29 +921,29 @@ def run_single_phase_pump():
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("**Saugseite**")
-                st.session.state.pipeline.suction_length_m = st.number_input("Länge [m]", min_value=0.0, value=10.0, key="s_len")
-                st.session.state.pipeline.suction_diameter_mm = st.number_input("Durchmesser [mm]", min_value=10.0, value=150.0, key="s_dia")
-                st.session.state.pipeline.suction_fittings_k = st.number_input("Σk Armaturen", min_value=0.0, value=5.0, key="s_k")
-                st.session.state.pipeline.geodetic_suction_m = st.number_input("Geodät. Saughöhe [m]", value=2.0, key="s_geo")
+                st.session_state.pipeline.suction_length_m = st.number_input("Länge [m]", min_value=0.0, value=10.0, key="s_len")
+                st.session_state.pipeline.suction_diameter_mm = st.number_input("Durchmesser [mm]", min_value=10.0, value=150.0, key="s_dia")
+                st.session_state.pipeline.suction_fittings_k = st.number_input("Σk Armaturen", min_value=0.0, value=5.0, key="s_k")
+                st.session_state.pipeline.geodetic_suction_m = st.number_input("Geodät. Saughöhe [m]", value=2.0, key="s_geo")
             with col2:
                 st.markdown("**Druckseite**")
-                st.session.state.pipeline.discharge_length_m = st.number_input("Länge [m]", min_value=0.0, value=100.0, key="d_len")
-                st.session.state.pipeline.discharge_diameter_mm = st.number_input("Durchmesser [mm]", min_value=10.0, value=125.0, key="d_dia")
-                st.session.state.pipeline.discharge_fittings_k = st.number_input("Σk Armaturen", min_value=0.0, value=15.0, key="d_k")
-                st.session.state.pipeline.static_head_m = st.number_input("Statische Höhe [m]", min_value=0.0, value=20.0, key="d_static")
+                st.session_state.pipeline.discharge_length_m = st.number_input("Länge [m]", min_value=0.0, value=100.0, key="d_len")
+                st.session_state.pipeline.discharge_diameter_mm = st.number_input("Durchmesser [mm]", min_value=10.0, value=125.0, key="d_dia")
+                st.session_state.pipeline.discharge_fittings_k = st.number_input("Σk Armaturen", min_value=0.0, value=15.0, key="d_k")
+                st.session_state.pipeline.static_head_m = st.number_input("Statische Höhe [m]", min_value=0.0, value=20.0, key="d_static")
         
         with tab3:
             st.subheader("Wirtschaftlichkeit (LCC)")
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.session.state.economic.energy_cost_eur_kwh = st.number_input("Strompreis [€/kWh]", min_value=0.01, value=0.15, step=0.01)
-                st.session.state.economic.operating_hours_year = st.number_input("Betriebsstunden [h/a]", min_value=100, value=8000, step=100)
+                st.session_state.economic.energy_cost_eur_kwh = st.number_input("Strompreis [€/kWh]", min_value=0.01, value=0.15, step=0.01)
+                st.session_state.economic.operating_hours_year = st.number_input("Betriebsstunden [h/a]", min_value=100, value=8000, step=100)
             with col2:
-                st.session.state.economic.expected_lifetime_years = st.number_input("Lebensdauer [Jahre]", min_value=1, value=15)
-                st.session.state.economic.maintenance_cost_pct = st.number_input("Wartung [%/a]", min_value=0.0, value=3.0, step=0.5)
+                st.session_state.economic.expected_lifetime_years = st.number_input("Lebensdauer [Jahre]", min_value=1, value=15)
+                st.session_state.economic.maintenance_cost_pct = st.number_input("Wartung [%/a]", min_value=0.0, value=3.0, step=0.5)
             with col3:
-                st.session.state.economic.discount_rate_pct = st.number_input("Diskontierungszins [%]", min_value=0.0, value=5.0, step=0.5)
-                st.session.state.economic.installation_factor = st.number_input("Installationsfaktor", min_value=1.0, value=1.5, step=0.1)
+                st.session_state.economic.discount_rate_pct = st.number_input("Diskontierungszins [%]", min_value=0.0, value=5.0, step=0.5)
+                st.session_state.economic.installation_factor = st.number_input("Installationsfaktor", min_value=1.0, value=1.5, step=0.1)
         
         with tab4:
             # Berechnung
@@ -964,7 +964,7 @@ def run_single_phase_pump():
             P_motor_kW = motor_iec(P_vis_kW * (1.0 + reserve_pct / 100.0))
             
             # NPSH
-            NPSHa = calculate_npsh_available(st.session.state.pipeline, st.session.state.process, Q_vis_req)
+            NPSHa = calculate_npsh_available(st.session_state.pipeline, st.session_state.process, Q_vis_req)
             NPSHr = safe_interp(Q_vis_req, pump["Qw"], pump.get("NPSHr", [2.0]*len(pump["Qw"])))
             NPSH_margin = NPSHa - NPSHr
             
@@ -974,18 +974,18 @@ def run_single_phase_pump():
             
             results = {"Q_op": Q_vis_req, "H_op": H_vis_req, "eta": eta_vis,
                        "P_shaft": P_vis_kW, "P_motor": P_motor_kW, "NPSHa": NPSHa, "NPSHr": NPSHr}
-            st.session.state.calculation_results = results
-            st.session.state.selected_pump = pump
+            st.session_state.calculation_results = results
+            st.session_state.selected_pump = pump
             
             st.subheader("📊 Ergebnisse")
             
             # Normprüfung
             standard = PumpStandard.ISO_5199
             for s in PumpStandard:
-                if s.value == st.session.state.project.standard:
+                if s.value == st.session_state.project.standard:
                     standard = s
                     break
-            compliance = check_standard_compliance(pump, st.session.state.process, standard)
+            compliance = check_standard_compliance(pump, st.session_state.process, standard)
             for c in compliance:
                 if c["severity"] == "error":
                     st.error(c["msg"])
@@ -1019,7 +1019,7 @@ def run_single_phase_pump():
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("🔩 Werkstoff")
-                recommended_mats = recommend_materials(st.session.state.process)
+                recommended_mats = recommend_materials(st.session_state.process)
                 available_mats = pump.get("materials_available", ["CAST_IRON"])
                 suitable_mats = [m for m in recommended_mats if m in available_mats]
                 if not suitable_mats:
@@ -1039,7 +1039,7 @@ def run_single_phase_pump():
             seal_factor = SealType[selected_seal].value[1] if selected_seal in SealType.__members__ else 1.0
             
             lcc = calculate_lcc(pump.get("price_eur", 5000), P_vis_kW, eta_vis,
-                               st.session.state.economic, mat_factor, seal_factor)
+                               st.session_state.economic, mat_factor, seal_factor)
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -1063,7 +1063,7 @@ def run_single_phase_pump():
             h_vis_plot = [h for q, h in zip(Q_vis_curve, H_vis_curve) if q > 0]
             ax1.plot(q_vis_plot, h_vis_plot, "r--s", label=f"Viskos ν={nu:.1f} cSt", linewidth=2)
             Q_range = np.linspace(0.1, max(pump["Qw"]) * 1.2, 50)
-            H_system = calculate_system_curve(st.session.state.pipeline, st.session.state.process, Q_range)
+            H_system = calculate_system_curve(st.session_state.pipeline, st.session_state.process, Q_range)
             ax1.plot(Q_range, H_system, "g-.", label="Anlagenkennlinie", linewidth=2)
             ax1.scatter([Q_vis_req], [H_vis_req], s=150, c="red", marker="★", zorder=5, label="Betriebspunkt")
             ax1.set_xlabel("Q [m³/h]"); ax1.set_ylabel("H [m]"); ax1.set_title("Q-H Kennlinie")
@@ -1092,7 +1092,7 @@ def run_single_phase_pump():
             ax4 = axes[1, 1]
             NPSHr_curve = pump.get("NPSHr", [2.0] * len(pump["Qw"]))
             ax4.plot(pump["Qw"], NPSHr_curve, "b-o", label="NPSHr", linewidth=2)
-            NPSHa_curve = [calculate_npsh_available(st.session.state.pipeline, st.session.state.process, q) 
+            NPSHa_curve = [calculate_npsh_available(st.session_state.pipeline, st.session_state.process, q) 
                           for q in pump["Qw"]]
             ax4.plot(pump["Qw"], NPSHa_curve, "g--", label="NPSHa", linewidth=2)
             ax4.scatter([Q_vis_req], [NPSHr], s=100, c="blue", marker="★", zorder=5)
@@ -1108,12 +1108,12 @@ def run_single_phase_pump():
             st.subheader("📤 Export")
             col1, col2 = st.columns(2)
             with col1:
-                html = generate_datasheet_html(st.session.state.project, st.session.state.process, pump, results)
+                html = generate_datasheet_html(st.session_state.project, st.session_state.process, pump, results)
                 st.download_button("📄 Datenblatt (HTML)", data=html,
                     file_name=f"Datenblatt_{pump['id']}_{datetime.now().strftime('%Y%m%d')}.html", mime="text/html")
             with col2:
-                json_data = generate_project_json(st.session.state.project, st.session.state.process,
-                    st.session.state.pipeline, st.session.state.economic, results)
+                json_data = generate_project_json(st.session_state.project, st.session_state.process,
+                    st.session_state.pipeline, st.session_state.economic, results)
                 st.download_button("💾 Projekt (JSON)", data=json_data,
                     file_name=f"Projekt_{datetime.now().strftime('%Y%m%d')}.json", mime="application/json")
     
