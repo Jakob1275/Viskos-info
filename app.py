@@ -864,8 +864,8 @@ def render_project_header():
         
         with st.expander("📋 Projektdaten", expanded=False):
             st.session_state.project.project_id = st.text_input(
-                "Projekt-ID", value=st.session.state.project.project_id, placeholder="PRJ-2024-001")
-            st.session.state.project.project_name = st.text_input(
+                "Projekt-ID", value=st.session_state.project.project_id, placeholder="PRJ-2024-001")
+            st.session_state.project.project_name = st.text_input(
                 "Projektname", value=st.session.state.project.project_name)
             st.session.state.project.customer = st.text_input(
                 "Kunde", value=st.session.state.project.customer)
@@ -1845,4 +1845,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
