@@ -1065,7 +1065,7 @@ def run_single_phase_pump():
             Q_range = np.linspace(0.1, max(pump["Qw"]) * 1.2, 50)
             H_system = calculate_system_curve(st.session_state.pipeline, st.session_state.process, Q_range)
             ax1.plot(Q_range, H_system, "g-.", label="Anlagenkennlinie", linewidth=2)
-            ax1.scatter([Q_vis_req], [H_vis_req], s=150, c="red", marker="★", zorder=5, label="Betriebspunkt")
+            ax1.scatter([Q_vis_req], [H_vis_req], s=150, c="red", marker="*", zorder=5, label="Betriebspunkt")
             ax1.set_xlabel("Q [m³/h]"); ax1.set_ylabel("H [m]"); ax1.set_title("Q-H Kennlinie")
             ax1.grid(True, alpha=0.3); ax1.legend()
             
@@ -1074,7 +1074,7 @@ def run_single_phase_pump():
             ax2.plot(pump["Qw"], [e*100 for e in pump["eta"]], "b-o", label="Wasser", linewidth=2)
             eta_vis_plot = [e*100 for q, e in zip(Q_vis_curve, eta_vis_curve) if q > 0]
             ax2.plot(q_vis_plot, eta_vis_plot, "r--s", label="Viskos", linewidth=2)
-            ax2.scatter([Q_vis_req], [eta_vis*100], s=100, c="red", marker="★", zorder=5)
+            ax2.scatter([Q_vis_req], [eta_vis*100], s=100, c="red", marker="*", zorder=5)
             ax2.set_xlabel("Q [m³/h]"); ax2.set_ylabel("η [%]"); ax2.set_title("Q-η Kennlinie")
             ax2.grid(True, alpha=0.3); ax2.legend()
             
@@ -1083,7 +1083,7 @@ def run_single_phase_pump():
             ax3.plot(pump["Qw"], pump["Pw"], "b-o", label="Wasser", linewidth=2)
             p_vis_plot = [p for q, p in zip(Q_vis_curve, P_vis_curve) if q > 0]
             ax3.plot(q_vis_plot, p_vis_plot, "r--s", label="Viskos", linewidth=2)
-            ax3.scatter([Q_vis_req], [P_vis_kW], s=100, c="red", marker="★", zorder=5)
+            ax3.scatter([Q_vis_req], [P_vis_kW], s=100, c="red", marker="*", zorder=5)
             ax3.axhline(P_motor_kW, color="green", linestyle="--", label=f"Motor {P_motor_kW:.1f} kW")
             ax3.set_xlabel("Q [m³/h]"); ax3.set_ylabel("P [kW]"); ax3.set_title("Q-P Kennlinie")
             ax3.grid(True, alpha=0.3); ax3.legend()
@@ -1095,8 +1095,8 @@ def run_single_phase_pump():
             NPSHa_curve = [calculate_npsh_available(st.session_state.pipeline, st.session_state.process, q) 
                           for q in pump["Qw"]]
             ax4.plot(pump["Qw"], NPSHa_curve, "g--", label="NPSHa", linewidth=2)
-            ax4.scatter([Q_vis_req], [NPSHr], s=100, c="blue", marker="★", zorder=5)
-            ax4.scatter([Q_vis_req], [NPSHa], s=100, c="green", marker="★", zorder=5)
+            ax4.scatter([Q_vis_req], [NPSHr], s=100, c="blue", marker="*", zorder=5)
+            ax4.scatter([Q_vis_req], [NPSHa], s=100, c="green", marker="*", zorder=5)
             ax4.set_xlabel("Q [m³/h]"); ax4.set_ylabel("NPSH [m]"); ax4.set_title("NPSH-Kurven")
             ax4.grid(True, alpha=0.3); ax4.legend()
             
@@ -1410,7 +1410,7 @@ def run_multi_phase_pump():
                             label=f"GVF {gvf}%", linewidth=2, markersize=4)
             
             ax1.scatter([best["Q_liq_m3h"]], [best["dp_bar"]], 
-                       s=200, c="red", marker="★", zorder=10, label="Betriebspunkt")
+                       s=200, c="red", marker="*", zorder=10, label="Betriebspunkt")
             ax1.axhline(best["dp_bar"], color="red", linestyle="--", alpha=0.5)
             ax1.axvline(best["Q_liq_m3h"], color="red", linestyle="--", alpha=0.5)
             ax1.set_xlabel("Q [m³/h]"); ax1.set_ylabel("Δp [bar]")
@@ -1429,7 +1429,7 @@ def run_multi_phase_pump():
                                 label=f"GVF {gvf}%", linewidth=2, markersize=4)
             
             ax2.scatter([best["Q_liq_m3h"]], [best["P_shaft_kW"]], 
-                       s=200, c="red", marker="★", zorder=10)
+                       s=200, c="red", marker="*", zorder=10)
             ax2.axhline(P_motor_iec, color="green", linestyle="--", 
                        label=f"Motor {P_motor_iec} kW")
             ax2.set_xlabel("Q [m³/h]"); ax2.set_ylabel("P [kW]")
@@ -1445,7 +1445,7 @@ def run_multi_phase_pump():
                        label=f"Austrittsdruck {best['p_discharge']:.1f} bar")
             ax3.axhline(best["C_sat_discharge"], color="red", linestyle=":", alpha=0.7)
             ax3.scatter([best["p_discharge"]], [best["C_sat_discharge"]], 
-                       s=150, c="red", marker="★", zorder=10)
+                       s=150, c="red", marker="*", zorder=10)
             C_target = (Q_gas_with_safety / m3h_to_lmin(best["Q_liq_m3h"])) * 1000 if best["Q_liq_m3h"] > 0 else 0
             ax3.axhline(C_target, color="orange", linestyle="-.", 
                        label=f"Ziel {C_target:.0f} cm³N/L")
