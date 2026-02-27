@@ -48,7 +48,7 @@ WATER_VISCOSITY_CST = 1.0
 WATER_VISCOSITY_TOL = 0.15  # treat as water if ν ≤ 1.15 cSt
 
 # --- Data directory ---
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent
 
 # ══════════════════════════════════════════════════════════════════
 # Section 2 · Data Models
