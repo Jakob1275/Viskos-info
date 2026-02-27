@@ -1033,170 +1033,223 @@ def render_single_phase_page(pumps: List[dict], media: dict):
 # ══════════════════════════════════════════════════════════════════
 # Section 15 · Page: Multi-Phase Pump
 # ══════════════════════════════════════════════════════════════════
+
+def _bisect_pressure(gas: str, T_c: float, C_target: float,
+                     p_lo: float = 0.5, p_hi: float = 50.0) -> Optional[float]:
+    """Return minimum pressure [bar] at which gas solubility ≥ C_target [cm³N/L]."""
+    if total_gas_solubility(gas, p_hi, T_c) < C_target:
+        return None
+    for _ in range(60):
+        mid = (p_lo + p_hi) / 2.0
+        if total_gas_solubility(gas, mid, T_c) >= C_target:
+            p_hi = mid
+        else:
+            p_lo = mid
+        if p_hi - p_lo < 0.01:
+            break
+    return p_hi
+
+
+def _diagnose_mph_failure(pump: dict, Q_gas_req: float, Q_gas_oper_lpm: float,
+                          p_suction: float, gas: str, T_c: float) -> str:
+    """Return a human-readable explanation of why a pump cannot satisfy the requirement."""
+    Q_max_lpm = m3h_to_lpm(pump["max_flow_m3h"])
+    gvf_at_max = Q_gas_oper_lpm / (Q_gas_oper_lpm + Q_max_lpm) * 100.0
+    if gvf_at_max > pump.get("max_gvf_pct", 20):
+        return (f"GVF = {gvf_at_max:.0f}% > max. {pump.get('max_gvf_pct', 20)}% "
+                f"– Gas-Anteil am Eingang zu hoch")
+    p_dis_max  = p_suction + pump.get("max_dp_bar", 10)
+    C_sat_max  = total_gas_solubility(gas, p_dis_max, T_c)
+    Q_sol_max  = (C_sat_max / 1000.0) * Q_max_lpm
+    if Q_sol_max < Q_gas_req:
+        return (f"Max. löslich {Q_sol_max:.0f} L/min < gefordert {Q_gas_req:.0f} L/min "
+                f"– auch bei max. Druck ({p_dis_max:.1f} bar) nicht ausreichend")
+    return "Kein konsistenter Betriebspunkt gefunden"
+
+
+def _render_no_solution_hints(gas: str, T_c: float, Q_gas_req: float, p_suction: float):
+    """Show the minimum discharge pressure needed at various liquid flows."""
+    st.divider()
+    st.subheader("💡 Was würde helfen?")
+    st.markdown("Mindest-Austrittsdruck für vollständige Gaslösung bei verschiedenen Flüssigkeitsströmen:")
+    rows = []
+    for Q_ref in [5, 10, 20, 30, 50]:
+        C_needed = (Q_gas_req / m3h_to_lpm(Q_ref)) * 1000.0
+        p_needed = _bisect_pressure(gas, T_c, C_needed)
+        if p_needed:
+            rows.append({
+                "Q_liq [m³/h]": Q_ref,
+                "Benötigte Konzentration [cm³N/L]": f"{C_needed:.0f}",
+                "Mindest-Austrittsdruck [bar(a)]": f"{p_needed:.1f}",
+                "Erforderliche Druckerhöhung Δp [bar]": f"{p_needed - p_suction:.1f}",
+            })
+    if rows:
+        st.dataframe(rows, use_container_width=True)
+    st.info("Tipp: Höherer Flüssigkeitsstrom oder höherer Saugdruck reduziert den erforderlichen Δp.")
+
+
 def render_multi_phase_page(mph_pumps: List[dict], media: dict):
     try:
         st.header("🌊 Mehrphasenpumpen-Auslegung")
-        st.info("Auslegung für Gas-Flüssigkeits-Gemische mit Berücksichtigung der Gaslöslichkeit nach Henry")
+        st.info(
+            "Die Pumpenauswahl erfolgt automatisch aus **Gasvolumenstrom** und **Medium**. "
+            "Der GVF am Pumpeneingang wird physikalisch berechnet. "
+            "Primäre Auswahlbedingung: vollständige Gaslösung am Druckaustritt (Henry-Gesetz)."
+        )
 
         tab_in, tab_res, tab_curves = st.tabs(["📝 Eingaben", "📊 Ergebnisse", "📈 Kennlinien"])
 
-        # --- Inputs ---
+        # ── Inputs (simplified) ────────────────────────────────────
         with tab_in:
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
 
             with col1:
                 st.subheader("Gasanforderung")
-                input_mode = st.radio("Eingabemodus", ["Gasvolumenstrom (Norm)", "Konzentration"])
-                if input_mode == "Gasvolumenstrom (Norm)":
-                    Q_gas_target_lpm = st.number_input("Ziel-Gasvolumenstrom [L/min]", 1.0, 500.0, 80.0, 5.0)
-                else:
-                    C_tgt = st.number_input("Ziel-Konzentration [cm³N/L]", 10.0, 500.0, 100.0, 10.0)
-                    Q_liq_for_C = st.number_input("Flüssigkeitsstrom [m³/h]", 1.0, 100.0, 15.0, 1.0)
-                    Q_gas_target_lpm = (C_tgt / 1000.0) * m3h_to_lpm(Q_liq_for_C)
-                    st.info(f"→ {Q_gas_target_lpm:.1f} L/min (Norm) bei {Q_liq_for_C} m³/h")
-
-                p_suction  = st.number_input("Saugdruck [bar(a)]", 0.3, 5.0, 0.6, 0.1)
-                dp_req     = st.number_input("Druckerhöhung [bar] (0=auto)", 0.0, 15.0, 6.0, 0.5)
+                Q_gas_target_lpm = st.number_input(
+                    "Ziel-Gasvolumenstrom [L/min, Normbedingungen]",
+                    min_value=1.0, max_value=500.0, value=80.0, step=5.0,
+                    help="Normvolumenstrom des zu lösenden Gases (0 °C / 1,013 bar)",
+                )
+                p_suction = st.number_input(
+                    "Saugdruck [bar(a)]",
+                    min_value=0.3, max_value=10.0, value=0.6, step=0.1,
+                    help="Absoluter Druck an der Pumpen-Saugseite",
+                )
+                safety_pct = st.slider(
+                    "Sicherheitszuschlag [%]", 0, 30, 10,
+                    help="Auslegungsreserve auf den Mindest-Gasvolumenstrom",
+                )
 
             with col2:
                 st.subheader("Medium")
-                gas_medium = st.selectbox("Gas", list(HENRY_CONSTANTS.keys()))
-                liq_medium = st.selectbox("Flüssigkeit", list(media.keys()))
+                gas_medium  = st.selectbox("Gas",         list(HENRY_CONSTANTS.keys()))
+                liq_medium  = st.selectbox("Flüssigkeit", list(media.keys()))
                 temperature = st.number_input("Temperatur [°C]", -10.0, 80.0, 20.0, 1.0)
                 rho_liq = media[liq_medium]["density_kgm3"]
                 nu_liq  = media[liq_medium]["viscosity_cst"]
-                st.caption(f"ρ = {rho_liq} kg/m³, ν = {nu_liq} cSt")
+                st.caption(f"ρ = {rho_liq} kg/m³  |  ν = {nu_liq} cSt")
 
-                st.subheader("Sicherheit")
-                safety_pct = st.slider("Sicherheitszuschlag [%]", 0, 30, 10)
+        # ── Physics-based selection ────────────────────────────────
+        # Gas flow including safety margin
+        Q_gas_req = Q_gas_target_lpm * (1.0 + safety_pct / 100.0)
 
-            with col3:
-                st.subheader("Optimierung")
-                allow_partial    = st.checkbox("Teilsättigung erlauben", value=False)
-                use_interpolation = st.checkbox("GVF-Interpolation",      value=True)
-                st.subheader("Gewichtung Score")
-                w_power = st.slider("Leistung",          0.0, 1.0, 0.4, 0.05)
-                w_eta   = st.slider("Wirkungsgrad",       0.0, 1.0, 0.3, 0.05)
-                w_gas   = st.slider("Gasmenge-Genauigkeit", 0.0, 1.0, 0.3, 0.05)
+        # Operational gas volume at suction pressure (ideal gas law)
+        T_K = temperature + 273.15
+        Q_gas_oper_lpm = Q_gas_req * (P_NORMAL_BAR / p_suction) * (T_K / T_NORMAL_K)
 
-        # --- Calculation ---
-        Q_gas_with_safety = Q_gas_target_lpm * (1 + safety_pct / 100.0)
-        results_list = []
+        ok_results:   List[dict] = []
+        fail_results: List[dict] = []
 
         for pump in mph_pumps:
-            if nu_liq  > pump.get("max_viscosity_cst",  500):  continue
-            if rho_liq > pump.get("max_density_kgm3",  1200):  continue
+            if nu_liq  > pump.get("max_viscosity_cst", 500):  continue
+            if rho_liq > pump.get("max_density_kgm3", 1200):  continue
 
-            gvf_keys = sorted(pump["curves_dp_vs_Q"].keys())
-            gvf_scan = gvf_keys if not use_interpolation else list(np.linspace(min(gvf_keys), max(gvf_keys), 20))
-            best_for_pump = None
+            ref_key = sorted(pump["curves_dp_vs_Q"].keys())[0]
+            Q_all   = [q for q in pump["curves_dp_vs_Q"][ref_key]["Q"] if q > 0]
+            Q_lo, Q_hi = max(min(Q_all), 1.0), min(max(Q_all), pump["max_flow_m3h"])
 
-            for gvf_pct in gvf_scan:
-                lo_key, _, _ = _gvf_bracket(pump, gvf_pct)
-                Q_list = pump["curves_dp_vs_Q"][lo_key]["Q"]
-                Q_min_c = max(min(q for q in Q_list if q > 0), 1.0)
-                Q_max_c = max(Q_list)
+            best_for_pump: Optional[dict] = None
 
-                for Q_liq in np.linspace(Q_min_c, Q_max_c, 30):
-                    dp_avail, *_ = dp_at_operating_point(pump, Q_liq, gvf_pct)
-                    P_shaft, *_  = power_at_operating_point(pump, Q_liq, gvf_pct)
+            for Q_liq in np.linspace(Q_lo, Q_hi, 80):
+                Q_liq_lpm = m3h_to_lpm(Q_liq)
 
-                    if dp_req > 0 and abs(dp_avail - dp_req) > 2.0:
-                        continue
+                # ① GVF at pump inlet – derived from physics, not a free parameter
+                gvf_pct = Q_gas_oper_lpm / (Q_gas_oper_lpm + Q_liq_lpm) * 100.0
+                if gvf_pct > pump.get("max_gvf_pct", 20):
+                    continue  # pump not rated for this gas fraction
 
-                    p_discharge = p_suction + dp_avail
-                    C_sat       = total_gas_solubility(gas_medium, p_discharge, temperature)
-                    C_curve     = (gvf_pct / 100.0) * 1000.0
-                    Q_liq_lpm   = m3h_to_lpm(Q_liq)
-                    Q_gas_lpm   = (C_curve / 1000.0) * Q_liq_lpm
+                # ② Pump curve at (Q_liq, GVF)
+                dp_avail, *_ = dp_at_operating_point(pump, Q_liq, gvf_pct)
+                P_shaft, *_  = power_at_operating_point(pump, Q_liq, gvf_pct)
+                if dp_avail <= 0:
+                    continue
 
-                    if Q_gas_lpm < Q_gas_with_safety * 0.9:
-                        continue
+                # ③ Solubility at discharge – PRIMARY CONSTRAINT
+                p_discharge    = p_suction + dp_avail
+                C_sat_dis      = total_gas_solubility(gas_medium, p_discharge, temperature)
+                Q_solvable_lpm = (C_sat_dis / 1000.0) * Q_liq_lpm
 
-                    Q_solvable_lpm = (C_sat / 1000.0) * Q_liq_lpm
-                    if not allow_partial and Q_gas_lpm > Q_solvable_lpm * 1.05:
-                        continue
+                if Q_solvable_lpm < Q_gas_req:
+                    continue  # discharge pressure too low to dissolve all gas
 
-                    P_hyd    = (dp_avail * BAR_TO_PA) * (Q_liq / 3600.0) / 1000.0
-                    eta_est  = clamp(P_hyd / max(P_shaft, 0.1), 0.1, 0.9)
-                    gas_err  = abs(Q_gas_lpm - Q_gas_with_safety) / Q_gas_with_safety
-                    dp_err   = abs(dp_avail - dp_req) / max(dp_req, 1.0) if dp_req > 0 else 0.0
-                    score    = w_gas * gas_err + w_power * P_shaft / max(Q_liq, 1.0) * 0.1 + w_eta * (1 - eta_est) + dp_err * 2.0
+                # ④ Score: prefer high efficiency / low specific power
+                P_hyd   = (dp_avail * BAR_TO_PA) * (Q_liq / 3600.0) / 1000.0
+                eta_est = clamp(P_hyd / max(P_shaft, 0.1), 0.05, 0.92)
+                score   = P_shaft / max(Q_liq, 1.0) + (1.0 - eta_est)
 
-                    cand = {
-                        "pump": pump, "pump_id": pump["id"],
-                        "Q_liq_m3h": Q_liq, "gvf_pct": gvf_pct,
-                        "dp_bar": dp_avail, "p_discharge": p_discharge,
-                        "P_shaft_kw": P_shaft, "eta_est": eta_est,
-                        "Q_gas_lpm": Q_gas_lpm, "Q_solvable_lpm": Q_solvable_lpm,
-                        "C_sat": C_sat, "solvable": Q_gas_lpm <= Q_solvable_lpm * 1.05,
-                        "n_rpm": pump["rated_speed_rpm"], "score": score,
-                    }
-                    if best_for_pump is None or score < best_for_pump["score"]:
-                        best_for_pump = cand
+                cand = {
+                    "pump": pump, "pump_id": pump["id"],
+                    "Q_liq_m3h": Q_liq, "Q_liq_lpm": Q_liq_lpm,
+                    "gvf_pct": gvf_pct,
+                    "dp_bar": dp_avail, "p_discharge": p_discharge,
+                    "P_shaft_kw": P_shaft, "eta_est": eta_est,
+                    "C_sat_dis": C_sat_dis,
+                    "Q_solvable_lpm": Q_solvable_lpm,
+                    "solubility_margin_pct": (Q_solvable_lpm / Q_gas_req - 1.0) * 100.0,
+                    "n_rpm": pump["rated_speed_rpm"],
+                    "score": score,
+                }
+                if best_for_pump is None or score < best_for_pump["score"]:
+                    best_for_pump = cand
 
             if best_for_pump:
-                results_list.append(best_for_pump)
+                ok_results.append(best_for_pump)
+            else:
+                fail_results.append({
+                    "pump_id": pump["id"], "pump": pump,
+                    "fail_reason": _diagnose_mph_failure(
+                        pump, Q_gas_req, Q_gas_oper_lpm, p_suction, gas_medium, temperature
+                    ),
+                })
 
-        results_list.sort(key=lambda x: x["score"])
+        ok_results.sort(key=lambda x: x["score"])
 
-        # --- Results tab ---
+        # ── Results tab ────────────────────────────────────────────
         with tab_res:
-            if not results_list:
-                st.error("❌ Keine geeignete Pumpe gefunden.")
-                st.info("Versuchen Sie: geringeren Gasvolumenstrom, höheren Saugdruck, oder 'Teilsättigung erlauben'.")
+            if not ok_results:
+                st.error("❌ Keine der verfügbaren Pumpen kann den Gasvolumenstrom vollständig lösen.")
+                for r in fail_results:
+                    st.warning(f"**{r['pump_id']}**: {r['fail_reason']}")
+                _render_no_solution_hints(gas_medium, temperature, Q_gas_req, p_suction)
                 return
 
-            best = results_list[0]
+            best = ok_results[0]
             st.success(f"✅ Empfehlung: **{best['pump_id']}**")
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Flüssigkeitsstrom", f"{best['Q_liq_m3h']:.1f} m³/h")
-            c1.metric("Gasvolumenstrom",   f"{best['Q_gas_lpm']:.1f} L/min (Norm)")
-            c2.metric("Druckerhöhung",     f"{best['dp_bar']:.2f} bar")
-            c2.metric("Austrittsdruck",    f"{best['p_discharge']:.2f} bar(a)")
-            c3.metric("Wellenleistung",    f"{best['P_shaft_kw']:.2f} kW")
-            c3.metric("Wirkungsgrad",      f"{best['eta_est']*100:.1f} %")
-            c4.metric("GVF (Kennlinie)",   f"{best['gvf_pct']:.1f} %")
-            c4.metric("Drehzahl",          f"{best['n_rpm']} rpm")
+            c1.metric("Flüssigkeitsstrom",      f"{best['Q_liq_m3h']:.1f} m³/h")
+            c1.metric("GVF Pumpeneingang",       f"{best['gvf_pct']:.1f} %")
+            c2.metric("Druckerhöhung Δp",        f"{best['dp_bar']:.2f} bar")
+            c2.metric("Austrittsdruck",          f"{best['p_discharge']:.2f} bar(a)")
+            c3.metric("Wellenleistung",          f"{best['P_shaft_kw']:.2f} kW")
+            c3.metric("Hydraul. Wirkungsgrad",   f"{best['eta_est']*100:.1f} %")
+            c4.metric("Löslichkeit am Austritt", f"{best['C_sat_dis']:.0f} cm³N/L")
+            c4.metric("Löslichkeitsreserve",     f"+{best['solubility_margin_pct']:.0f} %")
 
-            # Gas solubility analysis
+            # Solubility balance
             st.divider()
-            st.subheader("🧪 Gas-Löslichkeitsanalyse")
-            col1, col2 = st.columns(2)
+            st.subheader("🧪 Löslichkeitsbilanz")
+            col1, col2 = st.columns([3, 1])
             with col1:
+                C_req     = (Q_gas_req / best["Q_liq_lpm"]) * 1000.0
+                C_sat_in  = total_gas_solubility(gas_medium, p_suction, temperature)
+                C_free_in = max(0.0, C_req - C_sat_in)
                 st.markdown(f"""
 | Parameter | Wert |
 |---|---|
-| Ziel-Gasmenge | {Q_gas_target_lpm:.1f} L/min (Norm) |
-| Mit Sicherheit (+{safety_pct}%) | {Q_gas_with_safety:.1f} L/min |
-| Pumpe liefert | {best['Q_gas_lpm']:.1f} L/min |
-| Max. löslich (Druckseite) | {best['Q_solvable_lpm']:.1f} L/min |
+| Geforderter Gasvolumenstrom | **{Q_gas_target_lpm:.1f} L/min** (Norm) |
+| Mit Sicherheit (+{safety_pct} %) | **{Q_gas_req:.1f} L/min** |
+| Gewählter Flüssigkeitsstrom | {best['Q_liq_m3h']:.1f} m³/h |
+| Benötigte Konzentration | {C_req:.1f} cm³N/L |
+| Löslichkeit bei Saugdruck ({p_suction} bar) | {C_sat_in:.1f} cm³N/L |
+| Freies Gas am Pumpeneingang | {C_free_in:.1f} cm³N/L → GVF **{best['gvf_pct']:.1f} %** |
+| Löslichkeit bei Austrittsdruck ({best['p_discharge']:.1f} bar) | **{best['C_sat_dis']:.1f} cm³N/L** ✅ |
+| Max. löslicher Gasstrom | **{best['Q_solvable_lpm']:.1f} L/min** (+{best['solubility_margin_pct']:.0f} % Reserve) |
 """)
             with col2:
-                ratio = best["Q_gas_lpm"] / max(best["Q_solvable_lpm"], 0.01)
-                if ratio <= 1.0:
-                    st.success(f"✅ Gas vollständig löslich ({ratio*100:.0f}% der Sättigung)")
-                elif ratio <= 1.1:
-                    st.warning(f"⚠️ Nahe Sättigung ({ratio*100:.0f}%)")
-                else:
-                    st.error(f"❌ Übersättigung ({ratio*100:.0f}%) – freies Gas am Austritt!")
-                st.markdown(f"C_sat = **{best['C_sat']:.1f} cm³N/L** bei {best['p_discharge']:.1f} bar(a)")
-
-            # Alternatives
-            if len(results_list) > 1:
-                st.divider()
-                st.subheader("🔄 Alternative Pumpen")
-                alt_rows = []
-                for r in results_list[1:4]:
-                    alt_rows.append({
-                        "Pumpe": r["pump_id"], "Q_liq [m³/h]": f"{r['Q_liq_m3h']:.1f}",
-                        "Δp [bar]": f"{r['dp_bar']:.2f}", "P [kW]": f"{r['P_shaft_kw']:.1f}",
-                        "η [%]": f"{r['eta_est']*100:.0f}", "Gas [L/min]": f"{r['Q_gas_lpm']:.1f}",
-                        "Löslich": "✅" if r["solvable"] else "⚠️",
-                    })
-                if alt_rows:
-                    st.dataframe(alt_rows, use_container_width=True)
+                auslastung = min(Q_gas_req / max(best["Q_solvable_lpm"], 0.01), 1.0)
+                st.markdown("**Löslichkeits-auslastung**")
+                st.progress(auslastung, text=f"{auslastung*100:.0f} %")
 
             # Motor sizing
             st.divider()
@@ -1204,70 +1257,201 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
             P_mot_min = best["P_shaft_kw"] * 1.15
             P_mot_iec = next_iec_motor(P_mot_min)
             c1, c2, c3 = st.columns(3)
-            c1.metric("Wellenleistung",         f"{best['P_shaft_kw']:.2f} kW")
-            c2.metric("Min. Motorleistung +15%", f"{P_mot_min:.2f} kW")
-            c3.metric("IEC Motorgröße",          f"{P_mot_iec} kW")
+            c1.metric("Wellenleistung",              f"{best['P_shaft_kw']:.2f} kW")
+            c2.metric("Mindest-Motorleistung (+15%)", f"{P_mot_min:.2f} kW")
+            c3.metric("IEC-Motorgröße",              f"{P_mot_iec} kW")
 
-        # --- Curves tab ---
+            # All pumps overview
+            st.divider()
+            st.subheader("🔄 Alle Pumpen – Übersicht")
+            rows = []
+            for r in ok_results:
+                rows.append({
+                    "Pumpe": r["pump_id"], "Status": "✅",
+                    "Q_liq [m³/h]": f"{r['Q_liq_m3h']:.1f}",
+                    "GVF [%]": f"{r['gvf_pct']:.1f}",
+                    "Δp [bar]": f"{r['dp_bar']:.2f}",
+                    "P [kW]": f"{r['P_shaft_kw']:.1f}",
+                    "η [%]": f"{r['eta_est']*100:.0f}",
+                    "Löslichkeitsreserve": f"+{r['solubility_margin_pct']:.0f} %",
+                })
+            for r in fail_results:
+                rows.append({
+                    "Pumpe": r["pump_id"], "Status": "❌",
+                    "Q_liq [m³/h]": "–", "GVF [%]": "–", "Δp [bar]": "–",
+                    "P [kW]": "–", "η [%]": "–",
+                    "Löslichkeitsreserve": r["fail_reason"],
+                })
+            st.dataframe(rows, use_container_width=True)
+
+        # ── Curves tab ─────────────────────────────────────────────
         with tab_curves:
-            if not results_list:
+            if not ok_results:
                 return
-            best = results_list[0]
-            pump = best["pump"]
+            best      = ok_results[0]
+            pump      = best["pump"]
             P_mot_iec = next_iec_motor(best["P_shaft_kw"] * 1.15)
             gvf_keys  = sorted(pump["curves_dp_vs_Q"].keys())
-            colors    = plt.cm.viridis(np.linspace(0, 1, len(gvf_keys)))
+            cmap      = plt.cm.viridis(np.linspace(0, 1, len(gvf_keys)))
+            C_req     = (Q_gas_req / best["Q_liq_lpm"]) * 1000.0
 
             fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+            fig.suptitle(
+                f"{pump['id']}  |  Q_gas = {Q_gas_target_lpm:.0f} L/min ({gas_medium}, {temperature} °C)",
+                fontsize=12, fontweight="bold",
+            )
 
-            # Q-Δp
+            # 1 · Q-Δp with GVF family + operating point
             ax = axes[0, 0]
-            for gvf, col in zip(gvf_keys, colors):
-                q_v, dp_v = trim_arrays(pump["curves_dp_vs_Q"][gvf]["Q"], pump["curves_dp_vs_Q"][gvf]["dp"])
-                if len(q_v) >= 2:
-                    ax.plot(q_v, dp_v, "-o", color=col, label=f"GVF {gvf}%", lw=2, ms=4)
-            ax.scatter([best["Q_liq_m3h"]], [best["dp_bar"]], s=200, c="red", marker="*", zorder=10, label="Betriebspunkt")
-            ax.axhline(best["dp_bar"],    color="red", ls="--", alpha=0.4)
-            ax.axvline(best["Q_liq_m3h"], color="red", ls="--", alpha=0.4)
-            ax.set(xlabel="Q [m³/h]", ylabel="Δp [bar]", title=f"{pump['id']} – Q-Δp")
+            for gvf, col in zip(gvf_keys, cmap):
+                qv, dpv = trim_arrays(pump["curves_dp_vs_Q"][gvf]["Q"],
+                                      pump["curves_dp_vs_Q"][gvf]["dp"])
+                if len(qv) >= 2:
+                    ax.plot(qv, dpv, "-o", color=col, lw=2, ms=4, label=f"GVF {gvf} %")
+            ax.scatter([best["Q_liq_m3h"]], [best["dp_bar"]],
+                       s=250, c="red", marker="*", zorder=10,
+                       label=f"Betriebspunkt (GVF = {best['gvf_pct']:.1f} %)")
+            ax.axhline(best["dp_bar"],     color="red", ls="--", lw=1, alpha=0.4)
+            ax.axvline(best["Q_liq_m3h"],  color="red", ls="--", lw=1, alpha=0.4)
+            ax.set(xlabel="Q_liq [m³/h]", ylabel="Δp [bar]", title="Q-Δp Kennlinien")
             ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
-            # Q-P
+            # 2 · Q-P with motor line
             ax = axes[0, 1]
-            for gvf, col in zip(gvf_keys, colors):
+            for gvf, col in zip(gvf_keys, cmap):
                 if gvf in pump["power_kW_vs_Q"]:
-                    q_v, p_v = trim_arrays(pump["power_kW_vs_Q"][gvf]["Q"], pump["power_kW_vs_Q"][gvf]["P"])
-                    if len(q_v) >= 2:
-                        ax.plot(q_v, p_v, "-s", color=col, label=f"GVF {gvf}%", lw=2, ms=4)
-            ax.scatter([best["Q_liq_m3h"]], [best["P_shaft_kw"]], s=200, c="red", marker="*", zorder=10)
-            ax.axhline(P_mot_iec, color="green", ls="--", label=f"Motor {P_mot_iec} kW")
-            ax.set(xlabel="Q [m³/h]", ylabel="P [kW]", title="Q-P")
+                    qv, pv = trim_arrays(pump["power_kW_vs_Q"][gvf]["Q"],
+                                        pump["power_kW_vs_Q"][gvf]["P"])
+                    if len(qv) >= 2:
+                        ax.plot(qv, pv, "-s", color=col, lw=2, ms=4, label=f"GVF {gvf} %")
+            ax.scatter([best["Q_liq_m3h"]], [best["P_shaft_kw"]],
+                       s=250, c="red", marker="*", zorder=10)
+            ax.axhline(P_mot_iec, color="green", ls="--", lw=1.5,
+                       label=f"Motor {P_mot_iec} kW (IEC)")
+            ax.set(xlabel="Q_liq [m³/h]", ylabel="P [kW]", title="Q-P Kennlinien")
             ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
-            # Gas solubility vs pressure
+            # 3 · Gas solubility vs pressure (key chart)
             ax = axes[1, 0]
-            p_rng    = np.linspace(1, 12, 60)
-            C_curve  = [total_gas_solubility(gas_medium, p, temperature) for p in p_rng]
-            ax.plot(p_rng, C_curve, "b-", lw=2, label=f"{gas_medium} Löslichkeit")
-            ax.axvline(best["p_discharge"], color="red", ls="--", label=f"Austrittsdruck {best['p_discharge']:.1f} bar")
-            ax.scatter([best["p_discharge"]], [best["C_sat"]], s=150, c="red", marker="*", zorder=10)
-            C_ref = (Q_gas_with_safety / m3h_to_lpm(best["Q_liq_m3h"])) * 1000 if best["Q_liq_m3h"] > 0 else 0
-            ax.axhline(C_ref, color="orange", ls="-.", label=f"Ziel {C_ref:.0f} cm³N/L")
-            ax.set(xlabel="Druck [bar(a)]", ylabel="C_sat [cm³N/L]", title=f"Gas-Löslichkeit ({gas_medium}, {temperature}°C)", xlim=(0, 14))
+            p_max_chart = max(best["p_discharge"] * 1.6, 12.0)
+            p_rng = np.linspace(0.3, p_max_chart, 100)
+            C_sol = [total_gas_solubility(gas_medium, p, temperature) for p in p_rng]
+            ax.plot(p_rng, C_sol, "b-", lw=2.5, label=f"Löslichkeit {gas_medium}")
+            ax.axhline(C_req, color="orange", ls="-.", lw=1.5,
+                       label=f"Benötigte Konzentration {C_req:.0f} cm³N/L")
+            ax.axvline(p_suction, color="gray", ls=":", lw=1.5,
+                       label=f"Saugdruck {p_suction} bar")
+            ax.axvline(best["p_discharge"], color="red", ls="--", lw=1.5,
+                       label=f"Austrittsdruck {best['p_discharge']:.1f} bar")
+            ax.scatter([best["p_discharge"]], [best["C_sat_dis"]],
+                       s=180, c="red", marker="*", zorder=10)
+            # Annotate solubility margin
+            ax.annotate(
+                f"+{best['solubility_margin_pct']:.0f} % Reserve",
+                xy=(best["p_discharge"], best["C_sat_dis"]),
+                xytext=(best["p_discharge"] + 0.4, best["C_sat_dis"] * 1.05),
+                fontsize=8, color="green",
+                arrowprops=dict(arrowstyle="->", color="green", lw=0.8),
+            )
+            ax.set(xlabel="Druck [bar(a)]", ylabel="C_sat [cm³N/L]",
+                   title="Gas-Löslichkeit (Henry-Gesetz)", xlim=(0, p_max_chart))
             ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
-            # Pump comparison bar chart
+            # 4 · Solubility margin vs Q_liq
             ax = axes[1, 1]
-            names = [r["pump_id"] for r in results_list]
-            scores_vals = [r["score"] for r in results_list]
-            bar_colors  = ["green" if r["solvable"] else "orange" for r in results_list]
-            ax.barh(names, scores_vals, color=bar_colors, alpha=0.75)
-            ax.set(xlabel="Score (niedriger = besser)", title="Pumpenvergleich")
-            ax.invert_yaxis(); ax.grid(alpha=0.3, axis="x")
+            Q_scan = np.linspace(max(pump["max_flow_m3h"] * 0.1, 1.0),
+                                 pump["max_flow_m3h"], 80)
+            margins, gvfs = [], []
+            for Ql in Q_scan:
+                Ql_lpm = m3h_to_lpm(Ql)
+                gvf_p  = Q_gas_oper_lpm / (Q_gas_oper_lpm + Ql_lpm) * 100.0
+                gvfs.append(gvf_p)
+                if gvf_p > pump.get("max_gvf_pct", 20):
+                    margins.append(np.nan)
+                else:
+                    dp_v, *_ = dp_at_operating_point(pump, Ql, gvf_p)
+                    p_d = p_suction + max(dp_v, 0)
+                    C_d = total_gas_solubility(gas_medium, p_d, temperature)
+                    margins.append((C_d / 1000.0 * Ql_lpm / Q_gas_req - 1.0) * 100.0)
+
+            m_arr = np.array(margins, dtype=float)
+            ax.plot(Q_scan, m_arr, "b-", lw=2, label="Löslichkeitsreserve [%]")
+            ax.axhline(0, color="red", ls="--", lw=1.5, label="Mindest-Löslichkeit")
+            ax.fill_between(Q_scan, 0, np.where(m_arr > 0, m_arr, 0),
+                            color="green", alpha=0.15)
+            ax.fill_between(Q_scan, np.where(m_arr < 0, m_arr, 0), 0,
+                            color="red", alpha=0.15)
+            ax.scatter([best["Q_liq_m3h"]], [best["solubility_margin_pct"]],
+                       s=180, c="red", marker="*", zorder=10, label="Betriebspunkt")
+            ax2 = ax.twinx()
+            ax2.plot(Q_scan, gvfs, "g--", lw=1.2, alpha=0.55)
+            ax2.axhline(pump.get("max_gvf_pct", 20), color="green",
+                        ls=":", lw=1, alpha=0.5, label=f"GVF max {pump.get('max_gvf_pct',20)}%")
+            ax2.set_ylabel("GVF Eingang [%]", color="green", fontsize=8)
+            ax2.tick_params(axis="y", colors="green", labelsize=7)
+            ax.set(xlabel="Q_liq [m³/h]", ylabel="Löslichkeitsreserve [%]",
+                   title=f"{pump['id']} – Löslichkeitsreserve vs. Q_liq")
+            ax.legend(fontsize=8, loc="upper left"); ax.grid(alpha=0.3)
 
             plt.tight_layout()
             st.pyplot(fig)
             plt.close(fig)
+
+            # Export
+            st.divider()
+            col1, col2 = st.columns(2)
+            with col1:
+                summary = (
+                    f"MEHRPHASEN-PUMPENAUSLEGUNG\n"
+                    f"==========================\n"
+                    f"Datum: {datetime.now():%Y-%m-%d %H:%M}\n\n"
+                    f"ANFORDERUNG\n-----------\n"
+                    f"Gas:                     {gas_medium}\n"
+                    f"Flüssigkeit:             {liq_medium}\n"
+                    f"Temperatur:              {temperature} °C\n"
+                    f"Saugdruck:               {p_suction} bar(a)\n"
+                    f"Gasvolumenstrom:         {Q_gas_target_lpm:.1f} L/min (Norm)\n"
+                    f"Mit Sicherheit (+{safety_pct}%): {Q_gas_req:.1f} L/min\n\n"
+                    f"EMPFOHLENE PUMPE: {best['pump_id']}\n"
+                    f"--------------------\n"
+                    f"Flüssigkeitsstrom:       {best['Q_liq_m3h']:.1f} m³/h\n"
+                    f"GVF Pumpeneingang:       {best['gvf_pct']:.1f} %\n"
+                    f"Druckerhöhung:           {best['dp_bar']:.2f} bar\n"
+                    f"Austrittsdruck:          {best['p_discharge']:.2f} bar(a)\n"
+                    f"Wellenleistung:          {best['P_shaft_kw']:.2f} kW\n"
+                    f"IEC Motor:               {P_mot_iec} kW\n"
+                    f"Löslichkeit Austritt:    {best['C_sat_dis']:.1f} cm³N/L\n"
+                    f"Löslichkeitsreserve:     +{best['solubility_margin_pct']:.0f} %\n"
+                )
+                st.download_button("📄 Zusammenfassung (TXT)", data=summary,
+                                   file_name=f"MPH_{datetime.now():%Y%m%d}.txt",
+                                   mime="text/plain")
+            with col2:
+                export_data = {
+                    "timestamp": datetime.now().isoformat(),
+                    "input": {
+                        "gas": gas_medium, "liquid": liq_medium,
+                        "temperature_c": temperature,
+                        "p_suction_bar": p_suction,
+                        "Q_gas_target_lpm": Q_gas_target_lpm,
+                        "safety_pct": safety_pct,
+                    },
+                    "result": {
+                        "pump_id": best["pump_id"],
+                        "Q_liq_m3h": best["Q_liq_m3h"],
+                        "gvf_inlet_pct": best["gvf_pct"],
+                        "dp_bar": best["dp_bar"],
+                        "p_discharge_bar": best["p_discharge"],
+                        "P_shaft_kw": best["P_shaft_kw"],
+                        "P_motor_iec_kw": P_mot_iec,
+                        "C_sat_discharge_cm3n_l": best["C_sat_dis"],
+                        "solubility_margin_pct": best["solubility_margin_pct"],
+                    },
+                }
+                st.download_button("💾 Export (JSON)",
+                                   data=json.dumps(export_data, indent=2),
+                                   file_name=f"MPH_{datetime.now():%Y%m%d}.json",
+                                   mime="application/json")
 
     except Exception as e:
         st.error(f"Fehler in Mehrphasenpumpen: {e}")
