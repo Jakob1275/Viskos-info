@@ -15,6 +15,7 @@ Verzeichnisstruktur:
 # ══════════════════════════════════════════════════════════════════
 # Section 1 · Imports & Configuration
 # ══════════════════════════════════════════════════════════════════
+import html as html_mod
 import json
 import math
 import os
@@ -296,16 +297,23 @@ def real_gas_factor(gas: str, p_bar: float, T_c: float) -> float:
 
 
 def gas_solubility_cm3n_per_liter(gas: str, p_bar: float, T_c: float, y_gas: float = 1.0) -> float:
-    """Gas solubility [cm³(N)/L] via Henry's Law."""
+    """Gas solubility [cm³(N)/L] via Henry's Law with fugacity correction.
+
+    Henry's Law: C [mol/L] = fugacity / H = p_partial * Z / H
+    Z applied to p_partial acts as fugacity coefficient (enhances solubility at
+    high pressure vs. ideal-gas assumption). Conversion to normal volume uses
+    molar volume at normal conditions (≈22.4 L/mol at 0 °C, 1.01325 bar).
+    """
     p = max(float(p_bar), 1e-6)
     T_K = float(T_c) + 273.15
     H = max(henry_constant(gas, T_c), 1e-12)
     Z = max(real_gas_factor(gas, p, T_c), 0.5)
     p_partial = clamp(float(y_gas), 0.0, 1.0) * p
-    C_mol_l = p_partial / H
-    V_molar = (R_GAS_CONST * T_K) / p * Z
-    ratio = (p / P_NORMAL_BAR) * (T_NORMAL_K / T_K) / Z
-    return C_mol_l * V_molar * ratio * 1000.0
+    # Fugacity-corrected dissolution: f = p_partial * Z
+    C_mol_l = (p_partial * Z) / H
+    # Molar volume at normal conditions (Z_normal ≈ 1)
+    V_molar_normal = R_GAS_CONST * T_NORMAL_K / P_NORMAL_BAR   # ≈ 22.4 L/mol
+    return C_mol_l * V_molar_normal * 1000.0   # → cm³(N)/L
 
 
 def _air_solubility_correction(p_bar: float, T_c: float) -> float:
@@ -350,7 +358,9 @@ def friction_factor(Re: float, d_m: float, roughness_mm: float) -> float:
     if Re < 2300:
         return 64.0 / max(Re, 1e-6)
     k = roughness_mm / 1000.0
-    f = 0.25 / (math.log10(k / (3.7 * d_m) + 5.74 / (Re ** 0.9))) ** 2
+    _arg = k / (3.7 * d_m) + 5.74 / (Re ** 0.9)
+    f = 0.25 / (math.log10(max(_arg, 1e-10)) ** 2) if _arg > 0 else 0.02
+    f = max(f, 1e-6)   # guard against non-positive initial value
     for _ in range(20):
         rhs = -2.0 * math.log10(k / (3.7 * d_m) + 2.51 / (Re * math.sqrt(max(f, 1e-9))))
         f_new = (1.0 / rhs ** 2) if rhs != 0 else f
@@ -505,16 +515,21 @@ def find_speed_ratio(
 # Section 9 · Economic Analysis (LCC)
 # ══════════════════════════════════════════════════════════════════
 def compute_lcc(
-    pump_price: float, P_shaft_kw: float, eta: float,
+    pump_price: float, P_shaft_kw: float, motor_eta: float,
     econ: EconomicData,
     material_factor: float = 1.0, seal_factor: float = 1.0,
 ) -> dict:
-    """Life-Cycle Cost calculation following Europump methodology."""
+    """Life-Cycle Cost calculation following Europump methodology.
+
+    motor_eta: motor efficiency (not pump efficiency). Converts shaft power
+    to electrical input power: P_el = P_shaft / motor_eta.
+    Typical range 0.88–0.96 depending on IEC motor size.
+    """
     pump_cost     = pump_price * material_factor * seal_factor
     install_cost  = pump_cost * econ.installation_factor
     initial_cost  = pump_cost + install_cost
 
-    P_actual_kw       = P_shaft_kw / max(eta, 0.1)
+    P_actual_kw       = P_shaft_kw / max(motor_eta, 0.1)
     annual_energy_kwh = P_actual_kw * econ.operating_hours_yr
     annual_energy_eur = annual_energy_kwh * econ.electricity_price_eur_kwh
     annual_maint_eur  = pump_cost * (econ.maintenance_pct / 100.0)
@@ -659,11 +674,16 @@ def render_datasheet_html(
     project: ProjectInfo, process: ProcessConditions,
     pump: dict, results: dict,
 ) -> str:
+    # Escape all user-controlled strings to prevent XSS (CWE-79)
+    esc = html_mod.escape
+    pump_id  = esc(str(pump.get('id', 'N/A')))
+    pump_mfr = esc(str(pump.get('manufacturer', '')))
     return f"""<!DOCTYPE html>
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>Datenblatt – {pump.get('id','N/A')}</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+  <title>Datenblatt – {pump_id}</title>
   <style>
     body {{ font-family: Arial, sans-serif; max-width: 210mm; margin: 0 auto; padding: 20px; }}
     h1 {{ color: #2c5aa0; }}
@@ -676,10 +696,10 @@ def render_datasheet_html(
 <body>
 <h1>Technisches Datenblatt</h1>
 <p>
-  <strong>Projekt:</strong> {project.project_id} &nbsp;|&nbsp;
-  <strong>Rev.:</strong> {project.revision} &nbsp;|&nbsp;
-  <strong>Datum:</strong> {project.date} &nbsp;|&nbsp;
-  <strong>Bearbeiter:</strong> {project.engineer}
+  <strong>Projekt:</strong> {esc(str(project.project_id))} &nbsp;|&nbsp;
+  <strong>Rev.:</strong> {esc(str(project.revision))} &nbsp;|&nbsp;
+  <strong>Datum:</strong> {esc(str(project.date))} &nbsp;|&nbsp;
+  <strong>Bearbeiter:</strong> {esc(str(project.engineer))}
 </p>
 <h2>Prozessdaten</h2>
 <table>
@@ -690,7 +710,7 @@ def render_datasheet_html(
   <tr><th>Viskosität</th><td>{process.viscosity_cst:.2f} cSt</td></tr>
   <tr><th>Dampfdruck</th><td>{process.vapor_pressure_bar:.4f} bar(a)</td></tr>
 </table>
-<h2>Pumpe: {pump.get('id','N/A')} – {pump.get('manufacturer','')}</h2>
+<h2>Pumpe: {pump_id} – {pump_mfr}</h2>
 <table>
   <tr><th>Typ</th><td>{pump.get('pump_type','–')}</td></tr>
   <tr><th>Wirkungsgrad</th><td>{results.get('eta', 0)*100:.1f} %</td></tr>
@@ -920,7 +940,7 @@ def _render_single_phase_results(Q_vis, H_vis, nu, rho, reserve_pct, n_min, n_ma
     st.subheader("💰 Lebenszykluskosten (LCC)")
     mat_f  = MaterialClass[sel_mat].value[1]  if sel_mat  in MaterialClass.__members__  else 1.0
     seal_f = SealType[sel_seal].value[1]       if sel_seal in SealType.__members__       else 1.0
-    lcc = compute_lcc(pump.get("price_eur", 5000), P_shaft, eta_vis,
+    lcc = compute_lcc(pump.get("price_eur", 5000), P_shaft, 0.93,
                       st.session_state.economic, mat_f, seal_f)
 
     c1, c2, c3, c4 = st.columns(4)
@@ -1153,14 +1173,26 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
             for Q_liq in np.linspace(Q_lo, Q_hi, 80):
                 Q_liq_lpm = m3h_to_lpm(Q_liq)
 
-                # ① GVF at pump inlet – derived from physics, not a free parameter
-                gvf_pct = Q_gas_oper_lpm / (Q_gas_oper_lpm + Q_liq_lpm) * 100.0
-                if gvf_pct > pump.get("max_gvf_pct", 20):
-                    continue  # pump not rated for this gas fraction
+                # ① Luftanteil = GESAMTER Gasanteil am Volumenstrom bei Saugbedingungen
+                #    (gelöstes + freies Gas, als ob alles frei wäre)
+                #    → das ist der Kennlinien-Parameter der Pumpe ("prozentualer Luftanteil")
+                gas_loading_pct = Q_gas_oper_lpm / (Q_gas_oper_lpm + Q_liq_lpm) * 100.0
+                if gas_loading_pct > pump.get("max_gvf_pct", 20):
+                    continue  # max. Luftanteil der Pumpe überschritten
 
-                # ② Pump curve at (Q_liq, GVF)
-                dp_avail, *_ = dp_at_operating_point(pump, Q_liq, gvf_pct)
-                P_shaft, *_  = power_at_operating_point(pump, Q_liq, gvf_pct)
+                # ① Freier GVF am Eingang (gelöstes Gas belegt kein Volumen)
+                #    GVF_frei = Anteil des noch NICHT gelösten Gases bei p_suction
+                C_total_in   = (Q_gas_req / Q_liq_lpm) * 1000.0          # [cm³N/L]
+                C_sat_in     = total_gas_solubility(gas_medium, p_suction, temperature)
+                C_free_in    = max(0.0, C_total_in - C_sat_in)
+                Q_free_oper  = (C_free_in / 1000.0) * Q_liq_lpm * (P_NORMAL_BAR / p_suction) * (T_K / T_NORMAL_K)
+                gvf_free_pct = Q_free_oper / (Q_free_oper + Q_liq_lpm) * 100.0
+                # Hinweis: bei ausreichend hohem Saugdruck kann gvf_free_pct = 0 sein
+                #          (alles bereits am Eingang gelöst), GVF Austritt ist IMMER 0
+
+                # ② Kennlinie bei (Q_liq, Luftanteil) – NICHT beim freien GVF
+                dp_avail, *_ = dp_at_operating_point(pump, Q_liq, gas_loading_pct)
+                P_shaft, *_  = power_at_operating_point(pump, Q_liq, gas_loading_pct)
                 if dp_avail <= 0:
                     continue
 
@@ -1180,7 +1212,8 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
                 cand = {
                     "pump": pump, "pump_id": pump["id"],
                     "Q_liq_m3h": Q_liq, "Q_liq_lpm": Q_liq_lpm,
-                    "gvf_pct": gvf_pct,
+                    "gas_loading_pct": gas_loading_pct,   # Kennlinien-Parameter (gelöst + frei)
+                    "gvf_free_pct": gvf_free_pct,         # echter freier GVF am Eingang
                     "dp_bar": dp_avail, "p_discharge": p_discharge,
                     "P_shaft_kw": P_shaft, "eta_est": eta_est,
                     "C_sat_dis": C_sat_dis,
@@ -1217,14 +1250,17 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
             st.success(f"✅ Empfehlung: **{best['pump_id']}**")
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Flüssigkeitsstrom",      f"{best['Q_liq_m3h']:.1f} m³/h")
-            c1.metric("GVF Pumpeneingang",       f"{best['gvf_pct']:.1f} %")
-            c2.metric("Druckerhöhung Δp",        f"{best['dp_bar']:.2f} bar")
-            c2.metric("Austrittsdruck",          f"{best['p_discharge']:.2f} bar(a)")
-            c3.metric("Wellenleistung",          f"{best['P_shaft_kw']:.2f} kW")
-            c3.metric("Hydraul. Wirkungsgrad",   f"{best['eta_est']*100:.1f} %")
-            c4.metric("Löslichkeit am Austritt", f"{best['C_sat_dis']:.0f} cm³N/L")
-            c4.metric("Löslichkeitsreserve",     f"+{best['solubility_margin_pct']:.0f} %")
+            c1.metric("Flüssigkeitsstrom",         f"{best['Q_liq_m3h']:.1f} m³/h")
+            c1.metric("Luftanteil (Kennlinie)",    f"{best['gas_loading_pct']:.1f} %",
+                      help="Gesamter Gasanteil inkl. gelöstem Anteil – Kennlinienparameter")
+            c2.metric("Freier GVF Eingang",        f"{best['gvf_free_pct']:.1f} %",
+                      help="Tatsächlich freies (ungelöstes) Gas am Pumpeneingang")
+            c2.metric("GVF Austritt",              "0 %  ✅",
+                      help="Gesamtes Gas ist am Druckaustritt gelöst – Pflichtbedingung")
+            c3.metric("Druckerhöhung Δp",          f"{best['dp_bar']:.2f} bar")
+            c3.metric("Austrittsdruck",            f"{best['p_discharge']:.2f} bar(a)")
+            c4.metric("Wellenleistung",            f"{best['P_shaft_kw']:.2f} kW")
+            c4.metric("Löslichkeitsreserve",       f"+{best['solubility_margin_pct']:.0f} %")
 
             # Solubility balance
             st.divider()
@@ -1242,7 +1278,10 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
 | Gewählter Flüssigkeitsstrom | {best['Q_liq_m3h']:.1f} m³/h |
 | Benötigte Konzentration | {C_req:.1f} cm³N/L |
 | Löslichkeit bei Saugdruck ({p_suction} bar) | {C_sat_in:.1f} cm³N/L |
-| Freies Gas am Pumpeneingang | {C_free_in:.1f} cm³N/L → GVF **{best['gvf_pct']:.1f} %** |
+| Bereits gelöst bei Saugdruck | {min(C_sat_in, C_req):.1f} cm³N/L ({min(C_sat_in/C_req*100, 100):.0f}% des Gesamtgases) |
+| Freies Gas am Eingang (GVF_frei) | {C_free_in:.1f} cm³N/L → **{best['gvf_free_pct']:.1f} %** (freier GVF) |
+| Luftanteil Kennlinie | **{best['gas_loading_pct']:.1f} %** (gelöst + frei) |
+| **GVF Druckaustritt** | **0 %** – vollständig gelöst ✅ |
 | Löslichkeit bei Austrittsdruck ({best['p_discharge']:.1f} bar) | **{best['C_sat_dis']:.1f} cm³N/L** ✅ |
 | Max. löslicher Gasstrom | **{best['Q_solvable_lpm']:.1f} L/min** (+{best['solubility_margin_pct']:.0f} % Reserve) |
 """)
@@ -1269,7 +1308,8 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
                 rows.append({
                     "Pumpe": r["pump_id"], "Status": "✅",
                     "Q_liq [m³/h]": f"{r['Q_liq_m3h']:.1f}",
-                    "GVF [%]": f"{r['gvf_pct']:.1f}",
+                    "Luftanteil [%]": f"{r['gas_loading_pct']:.1f}",
+                    "GVF frei Eingang [%]": f"{r['gvf_free_pct']:.1f}",
                     "Δp [bar]": f"{r['dp_bar']:.2f}",
                     "P [kW]": f"{r['P_shaft_kw']:.1f}",
                     "η [%]": f"{r['eta_est']*100:.0f}",
@@ -1278,7 +1318,7 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
             for r in fail_results:
                 rows.append({
                     "Pumpe": r["pump_id"], "Status": "❌",
-                    "Q_liq [m³/h]": "–", "GVF [%]": "–", "Δp [bar]": "–",
+                    "Q_liq [m³/h]": "–", "Luftanteil [%]": "–", "GVF frei Eingang [%]": "–", "Δp [bar]": "–",
                     "P [kW]": "–", "η [%]": "–",
                     "Löslichkeitsreserve": r["fail_reason"],
                 })
@@ -1310,7 +1350,7 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
                     ax.plot(qv, dpv, "-o", color=col, lw=2, ms=4, label=f"GVF {gvf} %")
             ax.scatter([best["Q_liq_m3h"]], [best["dp_bar"]],
                        s=250, c="red", marker="*", zorder=10,
-                       label=f"Betriebspunkt (GVF = {best['gvf_pct']:.1f} %)")
+                       label=f"Betriebspunkt (Luftanteil = {best['gas_loading_pct']:.1f} %)")
             ax.axhline(best["dp_bar"],     color="red", ls="--", lw=1, alpha=0.4)
             ax.axvline(best["Q_liq_m3h"],  color="red", ls="--", lw=1, alpha=0.4)
             ax.set(xlabel="Q_liq [m³/h]", ylabel="Δp [bar]", title="Q-Δp Kennlinien")
@@ -1387,7 +1427,7 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
             ax2.plot(Q_scan, gvfs, "g--", lw=1.2, alpha=0.55)
             ax2.axhline(pump.get("max_gvf_pct", 20), color="green",
                         ls=":", lw=1, alpha=0.5, label=f"GVF max {pump.get('max_gvf_pct',20)}%")
-            ax2.set_ylabel("GVF Eingang [%]", color="green", fontsize=8)
+            ax2.set_ylabel("Luftanteil Eingang [%]", color="green", fontsize=8)
             ax2.tick_params(axis="y", colors="green", labelsize=7)
             ax.set(xlabel="Q_liq [m³/h]", ylabel="Löslichkeitsreserve [%]",
                    title=f"{pump['id']} – Löslichkeitsreserve vs. Q_liq")
@@ -1415,7 +1455,8 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
                     f"EMPFOHLENE PUMPE: {best['pump_id']}\n"
                     f"--------------------\n"
                     f"Flüssigkeitsstrom:       {best['Q_liq_m3h']:.1f} m³/h\n"
-                    f"GVF Pumpeneingang:       {best['gvf_pct']:.1f} %\n"
+                    f"Luftanteil (Kennlinie):  {best['gas_loading_pct']:.1f} %\n"
+                    f"Freier GVF (Eingang):    {best['gvf_free_pct']:.1f} %\n"
                     f"Druckerhöhung:           {best['dp_bar']:.2f} bar\n"
                     f"Austrittsdruck:          {best['p_discharge']:.2f} bar(a)\n"
                     f"Wellenleistung:          {best['P_shaft_kw']:.2f} kW\n"
