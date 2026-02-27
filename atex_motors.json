@@ -1,0 +1,32 @@
+[
+  {
+    "id": "Standard Zone 2 (Ex ec)",
+    "marking": "II 3G Ex ec IIC T3 Gc",
+    "zones_suitable": [2],
+    "temp_class": "T3",
+    "max_surface_temp_c": 200.0,
+    "category": "3G",
+    "efficiency_class": "IE3",
+    "price_factor": 1.0
+  },
+  {
+    "id": "Zone 1 (Ex eb)",
+    "marking": "II 2G Ex eb IIC T4 Gb",
+    "zones_suitable": [1, 2],
+    "temp_class": "T4",
+    "max_surface_temp_c": 135.0,
+    "category": "2G",
+    "efficiency_class": "IE3",
+    "price_factor": 1.3
+  },
+  {
+    "id": "Zone 0/1 (Ex d)",
+    "marking": "II 1G Ex d IIC T4 Ga",
+    "zones_suitable": [0, 1, 2],
+    "temp_class": "T4",
+    "max_surface_temp_c": 135.0,
+    "category": "1G",
+    "efficiency_class": "IE3",
+    "price_factor": 1.8
+  }
+]

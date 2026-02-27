@@ -1,0 +1,27 @@
+{
+  "Wasser": {
+    "density_kgm3": 998.0,
+    "viscosity_cst": 1.0,
+    "vapor_pressure_bar": 0.023
+  },
+  "Wasser (60°C)": {
+    "density_kgm3": 983.0,
+    "viscosity_cst": 0.47,
+    "vapor_pressure_bar": 0.199
+  },
+  "Öl (leicht)": {
+    "density_kgm3": 850.0,
+    "viscosity_cst": 10.0,
+    "vapor_pressure_bar": 0.001
+  },
+  "Öl (schwer)": {
+    "density_kgm3": 900.0,
+    "viscosity_cst": 100.0,
+    "vapor_pressure_bar": 0.0001
+  },
+  "Glykol 30%": {
+    "density_kgm3": 1040.0,
+    "viscosity_cst": 2.5,
+    "vapor_pressure_bar": 0.015
+  }
+}
