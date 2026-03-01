@@ -25,8 +25,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 st.set_page_config(page_title="PumpDesign Pro", layout="wide", page_icon="🔧")
@@ -50,6 +51,20 @@ WATER_VISCOSITY_TOL = 0.15  # treat as water if ν ≤ 1.15 cSt
 
 # --- Data directory ---
 DATA_DIR = Path(__file__).parent
+
+# --- Plotly color palette (Viridis 10-stop hex) ---
+_VIRIDIS_STOPS = [
+    "#440154", "#482878", "#3e4989", "#31688e", "#26828e",
+    "#1f9e89", "#35b779", "#6ece58", "#b5de2b", "#fde725",
+]
+
+# --- Chart color roles ---
+_CLR_PRIMARY  = "#1565C0"   # water curves / primary
+_CLR_VISCOUS  = "#E53935"   # viscous curves
+_CLR_SYSTEM   = "#2E7D32"   # system curve / NPSHa / motor line
+_CLR_OP       = "gold"      # operating point marker
+_CLR_WARN     = "#F57F17"   # warning line
+_CHART_COLORS = ["#1565C0", "#E53935", "#2E7D32", "#F57F17"]
 
 # ══════════════════════════════════════════════════════════════════
 # Section 2 · Data Models
@@ -743,6 +758,107 @@ def export_project_json(
 
 
 # ══════════════════════════════════════════════════════════════════
+# Section 12b · UI Helpers
+# ══════════════════════════════════════════════════════════════════
+
+def _inject_css():
+    """Inject custom CSS for the professional engineering theme."""
+    st.markdown("""
+<style>
+/* ── Metric cards ── */
+[data-testid="metric-container"] {
+    background: #FFFFFF;
+    border-left: 4px solid #1565C0;
+    border-radius: 6px;
+    padding: 12px 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+}
+[data-testid="metric-container"] label {
+    text-transform: uppercase;
+    font-size: 0.70rem;
+    letter-spacing: 0.06em;
+    color: #555;
+}
+
+/* ── Page header ── */
+.pumpdesign-header {
+    padding: 18px 0 10px 0;
+    border-bottom: 3px solid #1565C0;
+    margin-bottom: 18px;
+}
+.pumpdesign-header h1 {
+    margin: 0;
+    font-size: 1.8rem;
+    color: #1A1A2E;
+}
+.pumpdesign-header p {
+    margin: 4px 0 0 0;
+    color: #555;
+    font-size: 0.92rem;
+}
+
+/* ── Status badges ── */
+.badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.badge-ok      { background: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7; }
+.badge-warning { background: #FFF8E1; color: #F57F17; border: 1px solid #FFE082; }
+.badge-error   { background: #FFEBEE; color: #C62828; border: 1px solid #EF9A9A; }
+.badge-info    { background: #E3F2FD; color: #1565C0; border: 1px solid #90CAF9; }
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background: #1A2744 !important;
+}
+[data-testid="stSidebar"] * {
+    color: #E8EDF5 !important;
+}
+[data-testid="stSidebar"] .stRadio label {
+    color: #CBD5E1 !important;
+}
+[data-testid="stSidebar"] hr {
+    border-color: #2E4070 !important;
+}
+
+/* ── Plotly chart container ── */
+[data-testid="stPlotlyChart"] {
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    overflow: hidden;
+}
+
+/* ── Section subheaders ── */
+h3 {
+    color: #1565C0;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+def _page_header(icon: str, title: str, subtitle: str = ""):
+    """Render a styled page header with accent underline."""
+    sub_html = f"<p>{subtitle}</p>" if subtitle else ""
+    st.markdown(
+        f'<div class="pumpdesign-header">'
+        f'<h1>{icon} {title}</h1>{sub_html}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _metric_card(label: str, value: str, unit: str = "", status: str = "neutral", delta: str = ""):
+    """Render a metric card with colored left border via native st.metric."""
+    display = f"{value} {unit}".strip()
+    st.metric(label=label, value=display, delta=delta if delta else None)
+
+
+# ══════════════════════════════════════════════════════════════════
 # Section 13 · Session State
 # ══════════════════════════════════════════════════════════════════
 def init_session_state():
@@ -761,8 +877,14 @@ def init_session_state():
 
 def _render_sidebar():
     with st.sidebar:
-        st.markdown(f"### {TOOL_NAME}")
-        st.caption(f"Version {VERSION}")
+        st.markdown(
+            f'<div style="padding:12px 0 8px 0;">'
+            f'<span style="font-size:1.4rem;font-weight:700;color:#E8EDF5;">🔧 {TOOL_NAME}</span>'
+            f'<span style="margin-left:8px;background:#1565C0;color:#fff;font-size:0.68rem;'
+            f'padding:2px 7px;border-radius:10px;vertical-align:middle;">v{VERSION}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
         st.divider()
 
         with st.expander("📋 Projektdaten", expanded=False):
@@ -775,12 +897,24 @@ def _render_sidebar():
             p.standard_name = st.selectbox("Auslegungsnorm", [s.value for s in PumpStandard], index=1)
 
         st.divider()
+        _page_icons = {
+            "Einphasenpumpen":  "⚙️",
+            "Mehrphasenpumpen": "🌊",
+            "ATEX-Auslegung":   "⚡",
+            "Pumpenvergleich":  "⚖️",
+            "Dokumentation":    "📚",
+        }
         page = st.radio(
-            "🧭 Navigation",
-            ["Einphasenpumpen", "Mehrphasenpumpen", "ATEX-Auslegung", "Pumpenvergleich", "Dokumentation"],
+            "Navigation",
+            list(_page_icons.keys()),
+            format_func=lambda p: f"{_page_icons[p]} {p}",
+            label_visibility="collapsed",
         )
         st.divider()
-        st.caption(f"© {datetime.now().year} {TOOL_NAME}")
+        st.markdown(
+            f'<span style="font-size:0.72rem;color:#8899BB;">© {datetime.now().year} {TOOL_NAME}</span>',
+            unsafe_allow_html=True,
+        )
     return page
 
 
@@ -953,7 +1087,6 @@ def _render_single_phase_results(Q_vis, H_vis, nu, rho, reserve_pct, n_min, n_ma
     # ---- Curves ----
     st.divider()
     st.subheader("📈 Kennlinien")
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
     q_vis_pos = [q for q in Qv_curve if q > 0]
     h_vis_pos = [h for q, h in zip(Qv_curve, Hv_curve) if q > 0]
@@ -961,47 +1094,83 @@ def _render_single_phase_results(Q_vis, H_vis, nu, rho, reserve_pct, n_min, n_ma
     p_vis_pos = [p for q, p in zip(Qv_curve, Pv_curve) if q > 0]
     Q_rng     = np.linspace(0.1, max(pump["Qw"]) * 1.2, 60)
     H_sys     = system_curve(st.session_state.pipeline, st.session_state.process, Q_rng)
-
-    # Q-H
-    ax = axes[0, 0]
-    ax.plot(pump["Qw"], pump["Hw"], "b-o", label="Wasser", lw=2)
-    ax.plot(q_vis_pos, h_vis_pos, "r--s", label=f"Viskos ν={nu:.1f} cSt", lw=2)
-    ax.plot(Q_rng, H_sys, "g-.", label="Anlage", lw=2)
-    ax.scatter([Q_vis], [H_vis], s=150, c="red", marker="*", zorder=5, label="Betriebspunkt")
-    ax.set(xlabel="Q [m³/h]", ylabel="H [m]", title="Q-H Kennlinie")
-    ax.grid(alpha=0.3); ax.legend()
-
-    # Q-η
-    ax = axes[0, 1]
-    ax.plot(pump["Qw"], [e * 100 for e in pump["eta"]], "b-o", label="Wasser", lw=2)
-    ax.plot(q_vis_pos, e_vis_pos, "r--s", label="Viskos", lw=2)
-    ax.scatter([Q_vis], [eta_vis * 100], s=100, c="red", marker="*", zorder=5)
-    ax.set(xlabel="Q [m³/h]", ylabel="η [%]", title="Q-η Kennlinie")
-    ax.grid(alpha=0.3); ax.legend()
-
-    # Q-P
-    ax = axes[1, 0]
-    ax.plot(pump["Qw"], pump["Pw"], "b-o", label="Wasser", lw=2)
-    ax.plot(q_vis_pos, p_vis_pos, "r--s", label="Viskos", lw=2)
-    ax.scatter([Q_vis], [P_shaft], s=100, c="red", marker="*", zorder=5)
-    ax.axhline(P_motor, color="green", ls="--", label=f"Motor {P_motor:.1f} kW")
-    ax.set(xlabel="Q [m³/h]", ylabel="P [kW]", title="Q-P Kennlinie")
-    ax.grid(alpha=0.3); ax.legend()
-
-    # NPSH
-    ax = axes[1, 1]
     NPSHr_curve = pump.get("NPSHr", [2.0] * len(pump["Qw"]))
     NPSHa_curve = [npsh_available(st.session_state.pipeline, st.session_state.process, q) for q in pump["Qw"]]
-    ax.plot(pump["Qw"], NPSHr_curve, "b-o", label="NPSHr", lw=2)
-    ax.plot(pump["Qw"], NPSHa_curve, "g--",  label="NPSHa", lw=2)
-    ax.scatter([Q_vis], [NPSHr], s=100, c="blue",  marker="*", zorder=5)
-    ax.scatter([Q_vis], [NPSHa], s=100, c="green", marker="*", zorder=5)
-    ax.set(xlabel="Q [m³/h]", ylabel="NPSH [m]", title="NPSH")
-    ax.grid(alpha=0.3); ax.legend()
 
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close(fig)
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=("Q-H Kennlinie", "Q-η Kennlinie", "Q-P Kennlinie", "NPSH"),
+        vertical_spacing=0.12, horizontal_spacing=0.10,
+    )
+
+    # (1,1) Q-H
+    fig.add_trace(go.Scatter(x=pump["Qw"], y=pump["Hw"], mode="lines+markers",
+        name="Wasser", line=dict(color=_CLR_PRIMARY, width=2),
+        marker=dict(size=6)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=q_vis_pos, y=h_vis_pos, mode="lines+markers",
+        name=f"Viskos ν={nu:.1f} cSt", line=dict(color=_CLR_VISCOUS, width=2, dash="dash"),
+        marker=dict(symbol="square", size=6)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=list(Q_rng), y=H_sys, mode="lines",
+        name="Anlage", line=dict(color=_CLR_SYSTEM, width=2, dash="dot"),
+        showlegend=True), row=1, col=1)
+    fig.add_trace(go.Scatter(x=[Q_vis], y=[H_vis], mode="markers",
+        name="Betriebspunkt", marker=dict(symbol="star", size=16, color=_CLR_OP,
+        line=dict(color="#333", width=1))), row=1, col=1)
+
+    # (1,2) Q-η
+    fig.add_trace(go.Scatter(x=pump["Qw"], y=[e * 100 for e in pump["eta"]], mode="lines+markers",
+        name="Wasser (η)", line=dict(color=_CLR_PRIMARY, width=2),
+        marker=dict(size=6), showlegend=False), row=1, col=2)
+    fig.add_trace(go.Scatter(x=q_vis_pos, y=e_vis_pos, mode="lines+markers",
+        name="Viskos (η)", line=dict(color=_CLR_VISCOUS, width=2, dash="dash"),
+        marker=dict(symbol="square", size=6), showlegend=False), row=1, col=2)
+    fig.add_trace(go.Scatter(x=[Q_vis], y=[eta_vis * 100], mode="markers",
+        name="OP (η)", marker=dict(symbol="star", size=16, color=_CLR_OP,
+        line=dict(color="#333", width=1)), showlegend=False), row=1, col=2)
+
+    # (2,1) Q-P
+    fig.add_trace(go.Scatter(x=pump["Qw"], y=pump["Pw"], mode="lines+markers",
+        name="Wasser (P)", line=dict(color=_CLR_PRIMARY, width=2),
+        marker=dict(size=6), showlegend=False), row=2, col=1)
+    fig.add_trace(go.Scatter(x=q_vis_pos, y=p_vis_pos, mode="lines+markers",
+        name="Viskos (P)", line=dict(color=_CLR_VISCOUS, width=2, dash="dash"),
+        marker=dict(symbol="square", size=6), showlegend=False), row=2, col=1)
+    fig.add_trace(go.Scatter(
+        x=[min(pump["Qw"]), max(pump["Qw"])],
+        y=[P_motor, P_motor], mode="lines",
+        name=f"Motor {P_motor:.1f} kW",
+        line=dict(color=_CLR_SYSTEM, width=2, dash="longdash"),
+        showlegend=False), row=2, col=1)
+    fig.add_trace(go.Scatter(x=[Q_vis], y=[P_shaft], mode="markers",
+        name="OP (P)", marker=dict(symbol="star", size=16, color=_CLR_OP,
+        line=dict(color="#333", width=1)), showlegend=False), row=2, col=1)
+
+    # (2,2) NPSH
+    fig.add_trace(go.Scatter(x=pump["Qw"], y=NPSHr_curve, mode="lines+markers",
+        name="NPSHr", line=dict(color=_CLR_VISCOUS, width=2),
+        marker=dict(size=6), showlegend=False), row=2, col=2)
+    fig.add_trace(go.Scatter(x=pump["Qw"], y=NPSHa_curve, mode="lines",
+        name="NPSHa", line=dict(color=_CLR_SYSTEM, width=2),
+        fill="tonexty", fillcolor="rgba(46,125,50,0.10)", showlegend=False), row=2, col=2)
+    fig.add_trace(go.Scatter(x=[Q_vis], y=[NPSHr], mode="markers",
+        name="OP NPSHr", marker=dict(symbol="star", size=14, color=_CLR_VISCOUS,
+        line=dict(color="#333", width=1)), showlegend=False), row=2, col=2)
+    fig.add_trace(go.Scatter(x=[Q_vis], y=[NPSHa], mode="markers",
+        name="OP NPSHa", marker=dict(symbol="star", size=14, color=_CLR_SYSTEM,
+        line=dict(color="#333", width=1)), showlegend=False), row=2, col=2)
+
+    fig.update_layout(
+        template="plotly_white", height=700,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(t=60, b=40),
+        paper_bgcolor="#FAFBFC", plot_bgcolor="#FAFBFC",
+    )
+    fig.update_xaxes(title_text="Q [m³/h]")
+    fig.update_yaxes(title_text="H [m]", row=1, col=1)
+    fig.update_yaxes(title_text="η [%]", row=1, col=2)
+    fig.update_yaxes(title_text="P [kW]", row=2, col=1)
+    fig.update_yaxes(title_text="NPSH [m]", row=2, col=2)
+    st.plotly_chart(fig, use_container_width=True)
 
     # ---- Export ----
     st.divider()
@@ -1022,9 +1191,9 @@ def _render_single_phase_results(Q_vis, H_vis, nu, rho, reserve_pct, n_min, n_ma
 
 def render_single_phase_page(pumps: List[dict], media: dict):
     try:
-        st.header("🔧 Einphasenpumpen mit Viskositätskorrektur")
-        tab_proc, tab_pipe, tab_econ, tab_res = st.tabs(
-            ["Prozessdaten", "Rohrleitung", "Wirtschaftlichkeit", "Ergebnisse"]
+        _page_header("⚙️", "Einphasenpumpen", "Pumpenauswahl mit Viskositätskorrektur nach HI-Methode")
+        tab_proc, tab_pipe, tab_econ = st.tabs(
+            ["Prozessdaten", "Rohrleitung", "Wirtschaftlichkeit"]
         )
 
         with tab_proc:
@@ -1043,8 +1212,11 @@ def render_single_phase_page(pumps: List[dict], media: dict):
         with tab_econ:
             _render_economic_tab()
 
-        with tab_res:
+        st.divider()
+        if Q > 0 and H > 0:
             _render_single_phase_results(Q, H, nu, rho, reserve_pct, n_min, n_max, pumps)
+        else:
+            st.info("ℹ️ Bitte Förderstrom Q und Förderhöhe H in den Prozessdaten eingeben.")
 
     except Exception as e:
         st.error(f"Fehler in Einphasenpumpen: {e}")
@@ -1110,14 +1282,14 @@ def _render_no_solution_hints(gas: str, T_c: float, Q_gas_req: float, p_suction:
 
 def render_multi_phase_page(mph_pumps: List[dict], media: dict):
     try:
-        st.header("🌊 Mehrphasenpumpen-Auslegung")
+        _page_header("🌊", "Mehrphasenpumpen-Auslegung", "Gaslösung nach Henry-Gesetz · GVF-Berechnung")
         st.info(
             "Die Pumpenauswahl erfolgt automatisch aus **Gasvolumenstrom** und **Medium**. "
             "Der GVF am Pumpeneingang wird physikalisch berechnet. "
             "Primäre Auswahlbedingung: vollständige Gaslösung am Druckaustritt (Henry-Gesetz)."
         )
 
-        tab_in, tab_res, tab_curves = st.tabs(["📝 Eingaben", "📊 Ergebnisse", "📈 Kennlinien"])
+        tab_in, tab_curves = st.tabs(["📝 Eingaben & Ergebnisse", "📈 Kennlinien"])
 
         # ── Inputs (simplified) ────────────────────────────────────
         with tab_in:
@@ -1237,8 +1409,9 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
 
         ok_results.sort(key=lambda x: x["score"])
 
-        # ── Results tab ────────────────────────────────────────────
-        with tab_res:
+        # ── Results ────────────────────────────────────────────────
+        with tab_in:
+            st.divider()
             if not ok_results:
                 st.error("❌ Keine der verfügbaren Pumpen kann den Gasvolumenstrom vollständig lösen.")
                 for r in fail_results:
@@ -1332,80 +1505,106 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
             pump      = best["pump"]
             P_mot_iec = next_iec_motor(best["P_shaft_kw"] * 1.15)
             gvf_keys  = sorted(pump["curves_dp_vs_Q"].keys())
-            cmap      = plt.cm.viridis(np.linspace(0, 1, len(gvf_keys)))
+            n_gvf     = len(gvf_keys)
+            _gvf_colors = [
+                _VIRIDIS_STOPS[int(i * (len(_VIRIDIS_STOPS) - 1) / max(n_gvf - 1, 1))]
+                for i in range(n_gvf)
+            ]
             C_req     = (Q_gas_req / best["Q_liq_lpm"]) * 1000.0
 
-            fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-            fig.suptitle(
-                f"{pump['id']}  |  Q_gas = {Q_gas_target_lpm:.0f} L/min ({gas_medium}, {temperature} °C)",
-                fontsize=12, fontweight="bold",
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=(
+                    "Q-Δp Kennlinien",
+                    "Q-P Kennlinien",
+                    f"Gas-Löslichkeit – Henry-Gesetz ({gas_medium})",
+                    f"{pump['id']} – Löslichkeitsreserve vs. Q_liq",
+                ),
+                specs=[[{}, {}], [{}, {"secondary_y": True}]],
+                vertical_spacing=0.13, horizontal_spacing=0.10,
             )
 
-            # 1 · Q-Δp with GVF family + operating point
-            ax = axes[0, 0]
-            for gvf, col in zip(gvf_keys, cmap):
+            # 1 · Q-Δp family curves
+            for idx, (gvf, col) in enumerate(zip(gvf_keys, _gvf_colors)):
                 qv, dpv = trim_arrays(pump["curves_dp_vs_Q"][gvf]["Q"],
                                       pump["curves_dp_vs_Q"][gvf]["dp"])
                 if len(qv) >= 2:
-                    ax.plot(qv, dpv, "-o", color=col, lw=2, ms=4, label=f"GVF {gvf} %")
-            ax.scatter([best["Q_liq_m3h"]], [best["dp_bar"]],
-                       s=250, c="red", marker="*", zorder=10,
-                       label=f"Betriebspunkt (Luftanteil = {best['gas_loading_pct']:.1f} %)")
-            ax.axhline(best["dp_bar"],     color="red", ls="--", lw=1, alpha=0.4)
-            ax.axvline(best["Q_liq_m3h"],  color="red", ls="--", lw=1, alpha=0.4)
-            ax.set(xlabel="Q_liq [m³/h]", ylabel="Δp [bar]", title="Q-Δp Kennlinien")
-            ax.legend(fontsize=8); ax.grid(alpha=0.3)
+                    fig.add_trace(go.Scatter(
+                        x=qv, y=dpv, mode="lines+markers",
+                        name=f"GVF {gvf} %", line=dict(color=col, width=2),
+                        marker=dict(size=4), legendgroup="gvf_dp",
+                        showlegend=(idx == 0),
+                    ), row=1, col=1)
+            # OP cross-lines
+            fig.add_hline(y=best["dp_bar"], line_dash="dot", line_color=_CLR_VISCOUS,
+                          line_width=1, opacity=0.5, row=1, col=1)
+            fig.add_vline(x=best["Q_liq_m3h"], line_dash="dot", line_color=_CLR_VISCOUS,
+                          line_width=1, opacity=0.5, row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=[best["Q_liq_m3h"]], y=[best["dp_bar"]], mode="markers",
+                name=f"Betriebspunkt (Luftanteil {best['gas_loading_pct']:.1f} %)",
+                marker=dict(symbol="star", size=18, color=_CLR_OP, line=dict(color="#333", width=1)),
+            ), row=1, col=1)
 
-            # 2 · Q-P with motor line
-            ax = axes[0, 1]
-            for gvf, col in zip(gvf_keys, cmap):
+            # 2 · Q-P family curves
+            for idx, (gvf, col) in enumerate(zip(gvf_keys, _gvf_colors)):
                 if gvf in pump["power_kW_vs_Q"]:
                     qv, pv = trim_arrays(pump["power_kW_vs_Q"][gvf]["Q"],
                                         pump["power_kW_vs_Q"][gvf]["P"])
                     if len(qv) >= 2:
-                        ax.plot(qv, pv, "-s", color=col, lw=2, ms=4, label=f"GVF {gvf} %")
-            ax.scatter([best["Q_liq_m3h"]], [best["P_shaft_kw"]],
-                       s=250, c="red", marker="*", zorder=10)
-            ax.axhline(P_mot_iec, color="green", ls="--", lw=1.5,
-                       label=f"Motor {P_mot_iec} kW (IEC)")
-            ax.set(xlabel="Q_liq [m³/h]", ylabel="P [kW]", title="Q-P Kennlinien")
-            ax.legend(fontsize=8); ax.grid(alpha=0.3)
+                        fig.add_trace(go.Scatter(
+                            x=qv, y=pv, mode="lines+markers",
+                            name=f"GVF {gvf} % (P)", line=dict(color=col, width=2),
+                            marker=dict(symbol="square", size=4),
+                            showlegend=False,
+                        ), row=1, col=2)
+            # Motor line
+            q_all = pump["curves_dp_vs_Q"][gvf_keys[0]]["Q"]
+            fig.add_hline(y=P_mot_iec, line_dash="longdash", line_color=_CLR_SYSTEM,
+                          line_width=2, annotation_text=f"Motor {P_mot_iec} kW",
+                          annotation_position="top left", row=1, col=2)
+            fig.add_trace(go.Scatter(
+                x=[best["Q_liq_m3h"]], y=[best["P_shaft_kw"]], mode="markers",
+                name="OP (P)", showlegend=False,
+                marker=dict(symbol="star", size=18, color=_CLR_OP, line=dict(color="#333", width=1)),
+            ), row=1, col=2)
 
-            # 3 · Gas solubility vs pressure (key chart)
-            ax = axes[1, 0]
+            # 3 · Henry's Law solubility
             p_max_chart = max(best["p_discharge"] * 1.6, 12.0)
             p_rng = np.linspace(0.3, p_max_chart, 100)
             C_sol = [total_gas_solubility(gas_medium, p, temperature) for p in p_rng]
-            ax.plot(p_rng, C_sol, "b-", lw=2.5, label=f"Löslichkeit {gas_medium}")
-            ax.axhline(C_req, color="orange", ls="-.", lw=1.5,
-                       label=f"Benötigte Konzentration {C_req:.0f} cm³N/L")
-            ax.axvline(p_suction, color="gray", ls=":", lw=1.5,
-                       label=f"Saugdruck {p_suction} bar")
-            ax.axvline(best["p_discharge"], color="red", ls="--", lw=1.5,
-                       label=f"Austrittsdruck {best['p_discharge']:.1f} bar")
-            ax.scatter([best["p_discharge"]], [best["C_sat_dis"]],
-                       s=180, c="red", marker="*", zorder=10)
-            # Annotate solubility margin
-            ax.annotate(
-                f"+{best['solubility_margin_pct']:.0f} % Reserve",
-                xy=(best["p_discharge"], best["C_sat_dis"]),
-                xytext=(best["p_discharge"] + 0.4, best["C_sat_dis"] * 1.05),
-                fontsize=8, color="green",
-                arrowprops=dict(arrowstyle="->", color="green", lw=0.8),
-            )
-            ax.set(xlabel="Druck [bar(a)]", ylabel="C_sat [cm³N/L]",
-                   title="Gas-Löslichkeit (Henry-Gesetz)", xlim=(0, p_max_chart))
-            ax.legend(fontsize=8); ax.grid(alpha=0.3)
+            fig.add_trace(go.Scatter(
+                x=list(p_rng), y=C_sol, mode="lines",
+                name=f"Löslichkeit {gas_medium}",
+                line=dict(color=_CLR_PRIMARY, width=2.5),
+                fill="tozeroy", fillcolor="rgba(21,101,192,0.08)",
+            ), row=2, col=1)
+            # Required concentration line
+            fig.add_hline(y=C_req, line_dash="dashdot", line_color=_CLR_WARN,
+                          line_width=1.5,
+                          annotation_text=f"Benötigt {C_req:.0f} cm³N/L",
+                          annotation_position="top left", row=2, col=1)
+            # Suction and discharge pressure markers
+            fig.add_vline(x=p_suction, line_dash="dot", line_color="gray",
+                          line_width=1.5, row=2, col=1)
+            fig.add_vline(x=best["p_discharge"], line_dash="dash", line_color=_CLR_VISCOUS,
+                          line_width=1.5,
+                          annotation_text=f"p_dis {best['p_discharge']:.1f} bar",
+                          annotation_position="top right", row=2, col=1)
+            fig.add_trace(go.Scatter(
+                x=[best["p_discharge"]], y=[best["C_sat_dis"]], mode="markers",
+                name=f"+{best['solubility_margin_pct']:.0f}% Reserve",
+                marker=dict(symbol="star", size=16, color=_CLR_VISCOUS, line=dict(color="#333", width=1)),
+            ), row=2, col=1)
 
-            # 4 · Solubility margin vs Q_liq
-            ax = axes[1, 1]
+            # 4 · Solubility margin vs Q_liq (primary) + gas loading % (secondary)
             Q_scan = np.linspace(max(pump["max_flow_m3h"] * 0.1, 1.0),
                                  pump["max_flow_m3h"], 80)
-            margins, gvfs = [], []
+            margins, gvf_scan = [], []
             for Ql in Q_scan:
                 Ql_lpm = m3h_to_lpm(Ql)
                 gvf_p  = Q_gas_oper_lpm / (Q_gas_oper_lpm + Ql_lpm) * 100.0
-                gvfs.append(gvf_p)
+                gvf_scan.append(gvf_p)
                 if gvf_p > pump.get("max_gvf_pct", 20):
                     margins.append(np.nan)
                 else:
@@ -1415,27 +1614,62 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
                     margins.append((C_d / 1000.0 * Ql_lpm / Q_gas_req - 1.0) * 100.0)
 
             m_arr = np.array(margins, dtype=float)
-            ax.plot(Q_scan, m_arr, "b-", lw=2, label="Löslichkeitsreserve [%]")
-            ax.axhline(0, color="red", ls="--", lw=1.5, label="Mindest-Löslichkeit")
-            ax.fill_between(Q_scan, 0, np.where(m_arr > 0, m_arr, 0),
-                            color="green", alpha=0.15)
-            ax.fill_between(Q_scan, np.where(m_arr < 0, m_arr, 0), 0,
-                            color="red", alpha=0.15)
-            ax.scatter([best["Q_liq_m3h"]], [best["solubility_margin_pct"]],
-                       s=180, c="red", marker="*", zorder=10, label="Betriebspunkt")
-            ax2 = ax.twinx()
-            ax2.plot(Q_scan, gvfs, "g--", lw=1.2, alpha=0.55)
-            ax2.axhline(pump.get("max_gvf_pct", 20), color="green",
-                        ls=":", lw=1, alpha=0.5, label=f"GVF max {pump.get('max_gvf_pct',20)}%")
-            ax2.set_ylabel("Luftanteil Eingang [%]", color="green", fontsize=8)
-            ax2.tick_params(axis="y", colors="green", labelsize=7)
-            ax.set(xlabel="Q_liq [m³/h]", ylabel="Löslichkeitsreserve [%]",
-                   title=f"{pump['id']} – Löslichkeitsreserve vs. Q_liq")
-            ax.legend(fontsize=8, loc="upper left"); ax.grid(alpha=0.3)
+            m_pos = np.where(m_arr > 0, m_arr, 0.0)
+            m_neg = np.where(m_arr < 0, m_arr, 0.0)
 
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
+            # Positive fill (ok region)
+            fig.add_trace(go.Scatter(
+                x=list(Q_scan), y=list(m_pos), mode="lines",
+                name="Reserve > 0", fill="tozeroy",
+                fillcolor="rgba(46,125,50,0.15)",
+                line=dict(color=_CLR_SYSTEM, width=2),
+            ), row=2, col=2, secondary_y=False)
+            # Negative fill (insufficient region)
+            fig.add_trace(go.Scatter(
+                x=list(Q_scan), y=list(m_neg), mode="lines",
+                name="Reserve < 0", fill="tozeroy",
+                fillcolor="rgba(198,40,40,0.15)",
+                line=dict(color=_CLR_VISCOUS, width=0),
+                showlegend=False,
+            ), row=2, col=2, secondary_y=False)
+            fig.add_hline(y=0, line_dash="dash", line_color=_CLR_VISCOUS,
+                          line_width=1.5, row=2, col=2)
+            fig.add_trace(go.Scatter(
+                x=[best["Q_liq_m3h"]], y=[best["solubility_margin_pct"]], mode="markers",
+                name="OP", showlegend=False,
+                marker=dict(symbol="star", size=18, color=_CLR_OP, line=dict(color="#333", width=1)),
+            ), row=2, col=2, secondary_y=False)
+            # Secondary: gas loading %
+            fig.add_trace(go.Scatter(
+                x=list(Q_scan), y=gvf_scan, mode="lines",
+                name="Luftanteil [%]", line=dict(color=_CLR_SYSTEM, width=1.5, dash="dash"),
+                opacity=0.6,
+            ), row=2, col=2, secondary_y=True)
+            fig.add_hline(
+                y=pump.get("max_gvf_pct", 20), line_dash="dot", line_color=_CLR_SYSTEM,
+                line_width=1, opacity=0.6, row=2, col=2,
+            )
+
+            fig.update_layout(
+                template="plotly_white", height=750,
+                title_text=(
+                    f"{pump['id']}  |  Q_gas = {Q_gas_target_lpm:.0f} L/min "
+                    f"({gas_medium}, {temperature} °C)"
+                ),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                margin=dict(t=80, b=40),
+                paper_bgcolor="#FAFBFC",
+            )
+            fig.update_xaxes(title_text="Q_liq [m³/h]", row=1, col=1)
+            fig.update_xaxes(title_text="Q_liq [m³/h]", row=1, col=2)
+            fig.update_xaxes(title_text="Druck [bar(a)]", row=2, col=1)
+            fig.update_xaxes(title_text="Q_liq [m³/h]", row=2, col=2)
+            fig.update_yaxes(title_text="Δp [bar]", row=1, col=1)
+            fig.update_yaxes(title_text="P [kW]", row=1, col=2)
+            fig.update_yaxes(title_text="C_sat [cm³N/L]", row=2, col=1)
+            fig.update_yaxes(title_text="Löslichkeitsreserve [%]", row=2, col=2, secondary_y=False)
+            fig.update_yaxes(title_text="Luftanteil [%]", row=2, col=2, secondary_y=True)
+            st.plotly_chart(fig, use_container_width=True)
 
             # Export
             st.divider()
@@ -1503,7 +1737,7 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
 # ══════════════════════════════════════════════════════════════════
 def render_atex_page(atex_motors: List[dict]):
     try:
-        st.header("⚡ ATEX-Motorauslegung")
+        _page_header("⚡", "ATEX-Motorauslegung", "Auslegung nach ATEX 2014/34/EU und EN 60079")
         st.info("Auslegung nach ATEX 2014/34/EU und EN 60079")
 
         TEMP_CLASS_LIMITS = {"T1": 450, "T2": 300, "T3": 200, "T4": 135, "T5": 100, "T6": 85}
@@ -1699,7 +1933,7 @@ Kennzeichnung:           {best_motor['marking']}
 # Section 17 · Page: Pump Comparison (improved)
 # ══════════════════════════════════════════════════════════════════
 def render_comparison_page(pumps: List[dict], media: dict):
-    st.header("⚖️ Pumpenvergleich")
+    _page_header("⚖️", "Pumpenvergleich", "Überlagerte Kennlinien und Betriebspunkt-Vergleich")
 
     if len(pumps) < 2:
         st.warning("Mindestens 2 Pumpen in der Datenbank erforderlich.")
@@ -1864,7 +2098,7 @@ def render_comparison_page(pumps: List[dict], media: dict):
 # Section 18 · Page: Documentation (improved)
 # ══════════════════════════════════════════════════════════════════
 def render_documentation_page():
-    st.header("📚 Dokumentation & Berechnungsgrundlagen")
+    _page_header("📚", "Dokumentation & Berechnungsgrundlagen", "Normen, Formeln und Werkstoffinformation")
 
     tab_fund, tab_calc, tab_std, tab_mat, tab_gloss = st.tabs(
         ["🔬 Grundlagen", "🧮 Berechnungen", "📐 Normen", "⚗️ Werkstoffe", "📖 Glossar"]
@@ -2073,6 +2307,7 @@ $$H(T) = H_0 \\cdot \\exp\\!\\left[B_H \\cdot \\left(\\frac{1}{T} - \\frac{1}{T_
 # ══════════════════════════════════════════════════════════════════
 def main():
     init_session_state()
+    _inject_css()
 
     # Load data (cached)
     pumps      = load_pumps()
@@ -2081,9 +2316,6 @@ def main():
     atex_mots  = load_atex_motors()
 
     page = _render_sidebar()
-
-    st.title(f"🔧 {TOOL_NAME}")
-    st.caption(f"Version {VERSION}")
 
     if page == "Einphasenpumpen":
         render_single_phase_page(pumps, media)
