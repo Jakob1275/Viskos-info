@@ -1962,7 +1962,7 @@ def render_multi_phase_page(mph_pumps: List[dict], media: dict):
                 st.subheader("Gasanforderung")
                 Q_gas_target_lpm = st.number_input(
                     "Ziel-Gasvolumenstrom [L/min, Normbedingungen]",
-                    min_value=1.0, max_value=500.0, value=80.0, step=5.0,
+                    min_value=1.0, max_value=500.0, value=50.0, step=5.0,
                     help="Normvolumenstrom des zu lösenden Gases (0 °C / 1,013 bar)",
                 )
                 p_suction = st.number_input(
